@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+    <head>
+        <meta charset="utf-8">
+        <title>WebGL Demo</title>
+        <link rel="stylesheet" href="style.css">
+    </head>
+
+    <body onload="InitWebGL();">
+        <canvas id="gl" width="1400" height="800px">
+            WebGL is not supported!
+        </canvas>
+
+        <textarea id="vs" spellcheck="false">
+            precision mediump float;
+
+            attribute vec3 Pos;
+            attribute vec3 Color;
+            varying vec3 vColor;
+
+            uniform mat4 Model;
+            uniform mat4 View;
+            uniform mat4 Projection;
+
+            varying vec3 vertexColor;
+
+            void main() {
+                gl_Position = Projection * View * Model * vec4(Pos, 1.0);
+                vertexColor = Color;
+            }
+
+    
+        </textarea>
+        
+        <textarea id="fs" spellcheck="false">
+            precision mediump float;
+            varying vec3 vertexColor;
+            void main(){
+                gl_FragColor= vec4(vertexColor, 1.0);
+            }
+        </textarea>
+        
+        <select id="shape" onchange="InitShaders();">
+            <option selected>Triangle</option>
+            <option>Quad</option>
+            <option>Box</option>
+            <option>Subdivede Box</option>
+        </select>
+
+        <div id="ui">Generate UI for geometry here</div>
+
+
+
+        <script type="module" src = "./main.js"></script>
+        <script src="webgl.js" defer></script>  
+
+    </body>
+    </html>
