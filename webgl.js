@@ -449,14 +449,22 @@ function CreateGeometryUI() {
         case 3: CreateSubdividedBox(w, h, d, divX, divY); break;
     }
 
-    //input dragg
-    ['scaleX', 'scaleY', 'scaleZ',
-     'transX', 'transY', 'transZ',
-     'shXY', 'shXZ',
-     'rotX', 'rotY, rotZ'].forEach(id => {
-           const el = document.getElementById(id);
-           if (el) makeInputDraggable(el, 0.01); 
-       });
+    [
+        { id: 'scaleX', step: 0.01 },
+        { id: 'scaleY', step: 0.01 },
+        { id: 'scaleZ', step: 0.01 },
+        { id: 'transX', step: 0.01 },
+        { id: 'transY', step: 0.01 },
+        { id: 'transZ', step: 0.01 },
+        { id: 'shXY',   step: 0.01 },
+        { id: 'shXZ',   step: 0.01 },
+        { id: 'rotX',   step: 1.0 },
+        { id: 'rotY',   step: 1.0 },
+        { id: 'rotZ',   step: 1.0 }
+    ].forEach(({ id, step }) => {
+        const el = document.getElementById(id);
+        if (el) makeInputDraggable(el, step);
+    });
 }
 
 
@@ -845,7 +853,14 @@ function makeInputDraggable(input, step = 0.1) {
             lastY = e.clientY;
 
             let current = parseFloat(input.value) || 0;
-            input.value = (current + delta * step).toFixed(2);
+            let min = parseFloat(input.min) || -Infinity;
+            let max = parseFloat(input.max) || Infinity;
+
+            let newValue = current + delta * step;
+            newValue = Math.max(min, Math.min(max, newValue));
+
+            input.value = newValue.toFixed(2);
+
 
             input.dispatchEvent(new Event('input'));
         }
@@ -858,4 +873,3 @@ function makeInputDraggable(input, step = 0.1) {
         }
     });
 }
-
