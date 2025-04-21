@@ -845,23 +845,24 @@ function makeInputDraggable(input, step = 0.1) {
         lastY = e.clientY;
         e.preventDefault();
         input.style.cursor = 'ns-resize';
+
+   
+        if (document.pointerLockElement !== document.body) {
+            document.body.requestPointerLock();
+        }
     });
 
     window.addEventListener('mousemove', (e) => {
         if (dragging) {
-            const delta = lastY - e.clientY;
-            lastY = e.clientY;
-
+            const delta = e.movementY; 
             let current = parseFloat(input.value) || 0;
             let min = parseFloat(input.min) || -Infinity;
             let max = parseFloat(input.max) || Infinity;
 
-            let newValue = current + delta * step;
+            let newValue = current - delta * step;
             newValue = Math.max(min, Math.min(max, newValue));
 
             input.value = newValue.toFixed(2);
-
-
             input.dispatchEvent(new Event('input'));
         }
     });
@@ -870,6 +871,70 @@ function makeInputDraggable(input, step = 0.1) {
         if (dragging) {
             dragging = false;
             input.style.cursor = 'auto';
+
+            if (document.pointerLockElement === document.body) {
+                document.exitPointerLock();
+            }
         }
     });
 }
+
+
+
+//mobil 
+
+let lastTouchX = null;
+let lastTouchY = null;
+let rotationX = 0;
+let rotationY = 0;
+
+
+
+canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+        lastTouchX = e.touches[0].clientX;
+        lastTouchY = e.touches[0].clientY;
+    }
+});
+
+canvas.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        const dx = touch.clientX - lastTouchX;
+        const dy = touch.clientY - lastTouchY;
+
+        rotationX += dx * 0.01;
+        rotationY += dy * 0.01;
+
+        lastTouchX = touch.clientX;
+        lastTouchY = touch.clientY;
+
+
+        updateRotation(rotationX, rotationY);
+    }
+});
+
+let lastDistance = null;
+let zoom = 1.0;
+
+canvas.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (lastDistance !== null) {
+            const delta = distance - lastDistance;
+            zoom += delta * 0.01;
+            zoom = Math.max(0.1, Math.min(zoom, 5.0)); 
+
+            updateZoom(zoom); 
+        }
+
+        lastDistance = distance;
+    }
+});
+
+canvas.addEventListener('touchend', () => {
+    lastDistance = null;
+});
