@@ -94,3 +94,32 @@ html, body {
     padding: 0;
     overflow: hidden;
 }
+#joystick {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    z-index: 999;
+}
+
+#joystick button {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    border: none;
+    background-color: rgba(255, 255, 255, 0.7);
+    font-size: 24px;
+    font-weight: bold;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    user-select: none;
+    touch-action: none;
+}
+
+#joystick .row {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+}

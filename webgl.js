@@ -6,6 +6,7 @@ let activeVertices = vertices;
 
 let hasLogged = false;
 let canvas;
+let joystick;
 
 const camera = {
     position: [0, 0, 3],
@@ -45,8 +46,10 @@ function InitWebGL()
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
+    joystick = setupJoystick();
+    setupTouch();
     InitViewport();
-    setupTouch()
+
 }
 
 function InitViewport()
@@ -606,34 +609,40 @@ function UpdateCamera(dt) {
         Math.sin(camera.yaw)
     ]);
 
-
-    if (keys['w']) {
-        camera.position[0] += forward[0] * velocity;
-        camera.position[1] += forward[1] * velocity;
-        camera.position[2] += forward[2] * velocity;
-    }
-    if (keys['s']) {
-        camera.position[0] -= forward[0] * velocity;
-        camera.position[1] -= forward[1] * velocity;
-        camera.position[2] -= forward[2] * velocity;
-    }
-    if (keys['a']) {
-        camera.position[0] -= right[0] * velocity;
-        camera.position[1] -= right[1] * velocity;
-        camera.position[2] -= right[2] * velocity;
-    }
-    if (keys['d']) {
-        camera.position[0] += right[0] * velocity;
-        camera.position[1] += right[1] * velocity;
-        camera.position[2] += right[2] * velocity;
-    }
-
     if (keys[' ']) { 
         camera.position[1] += velocity;
     }
     if (keys['shift']) {
         camera.position[1] -= velocity;
     }
+
+    if (keys['w'] || joystick?.up) camera.position = camera.position.map((v, i) => v + forward[i] * velocity);
+    if (keys['s'] || joystick?.down) camera.position = camera.position.map((v, i) => v - forward[i] * velocity);
+    if (keys['a'] || joystick?.left) camera.position = camera.position.map((v, i) => v - right[i] * velocity);
+    if (keys['d'] || joystick?.right) camera.position = camera.position.map((v, i) => v + right[i] * velocity);
+
+    // if (keys['w']) {
+    //     camera.position[0] += forward[0] * velocity;
+    //     camera.position[1] += forward[1] * velocity;
+    //     camera.position[2] += forward[2] * velocity;
+    // }
+    // if (keys['s']) {
+    //     camera.position[0] -= forward[0] * velocity;
+    //     camera.position[1] -= forward[1] * velocity;
+    //     camera.position[2] -= forward[2] * velocity;
+    // }
+    // if (keys['a']) {
+    //     camera.position[0] -= right[0] * velocity;
+    //     camera.position[1] -= right[1] * velocity;
+    //     camera.position[2] -= right[2] * velocity;
+    // }
+    // if (keys['d']) {
+    //     camera.position[0] += right[0] * velocity;
+    //     camera.position[1] += right[1] * velocity;
+    //     camera.position[2] += right[2] * velocity;
+    // }
+
+   
 }
 
 let lastTime = performance.now();
@@ -884,12 +893,29 @@ function makeInputDraggable(input, step = 0.1) {
 
 //mobil 
 
+
+function setupJoystick() {
+    const moveState = { left: false, right: false, up: false, down: false };
+
+    document.getElementById('up').addEventListener('touchstart', () => moveState.up = true);
+    document.getElementById('down').addEventListener('touchstart', () => moveState.down = true);
+    document.getElementById('left').addEventListener('touchstart', () => moveState.left = true);
+    document.getElementById('right').addEventListener('touchstart', () => moveState.right = true);
+
+    ['up', 'down', 'left', 'right'].forEach(dir => {
+        document.getElementById(dir).addEventListener('touchend', () => moveState[dir] = false);
+    });
+
+    return moveState;
+}
+
 function setupTouch() {
     let lastTouchX = null;
     let lastTouchY = null;
     let rotationX = 0;
     let rotationY = 0;
 
+    const touchSensitivity = 0.005;
 
     let lastDistance = null;
     let zoom = 1.0;
@@ -909,8 +935,8 @@ function setupTouch() {
             const dx = touch.clientX - lastTouchX;
             const dy = touch.clientY - lastTouchY;
     
-            rotationX += dx * 0.01;
-            rotationY += dy * 0.01;
+            rotationX += dx * touchSensitivity;
+            rotationY += dy * touchSensitivity;
     
             lastTouchX = touch.clientX;
             lastTouchY = touch.clientY;
@@ -951,6 +977,7 @@ function setupTouch() {
     }
 
     function updateZoom(zoomLevel) {
+
         const forward = normalize([
             Math.cos(camera.pitch) * Math.sin(camera.yaw),
             Math.sin(camera.pitch),
