@@ -588,10 +588,9 @@ function rotationZMatrix(angle) {
 //bevægelsesfunktion /copy viewMatrix
 function UpdateCamera(dt) {
 
-    const speed = 2.0; //farten vi bevæger os 
+    const speed = 2.0;
     const velocity = speed * dt;
 
-    
     const cosPitch = Math.cos(camera.pitch);
     const sinPitch = Math.sin(camera.pitch);
     const cosYaw = Math.cos(camera.yaw);
@@ -622,12 +621,14 @@ function UpdateCamera(dt) {
     if (keys['d']) camera.position = camera.position.map((v, i) => v + right[i] * velocity);
 
     if (joystickState.active) {
-        const angle = camera.yaw;
+        const yaw = camera.yaw;
+
+
         const dx = joystickState.direction[0];
-        const dy = -joystickState.direction[1];
+        const dy = joystickState.direction[1];
     
-        const moveX = Math.cos(angle) * dx - Math.sin(angle) * dy;
-        const moveZ = Math.sin(angle) * dx + Math.cos(angle) * dy;
+        const moveX = Math.sin(yaw) * dy + Math.cos(yaw) * dx;
+        const moveZ = -Math.cos(yaw) * dy + Math.sin(yaw) * dx;
     
         camera.position[0] += moveX * velocity;
         camera.position[2] += moveZ * velocity;
@@ -833,6 +834,7 @@ function drawModel() {
 
 
 
+                                                                  //mus
 
 
 let mouseX = 0;
@@ -903,7 +905,7 @@ function makeInputDraggable(input, step = 0.1) {
 
 
 
-//mobil 
+                                                                  //mobil 
 
 
 function setupTouch() {
