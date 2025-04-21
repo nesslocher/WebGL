@@ -6,7 +6,6 @@ let activeVertices = vertices;
 
 let hasLogged = false;
 let canvas;
-let joystick;
 
 const camera = {
     position: [0, 0, 3],
@@ -46,7 +45,8 @@ function InitWebGL()
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    joystick = setupJoystick();
+    
+    setupJoystickControl();
     setupTouch();
     InitViewport();
 
@@ -616,10 +616,15 @@ function UpdateCamera(dt) {
         camera.position[1] -= velocity;
     }
 
-    if (keys['w'] || joystick?.up) camera.position = camera.position.map((v, i) => v + forward[i] * velocity);
-    if (keys['s'] || joystick?.down) camera.position = camera.position.map((v, i) => v - forward[i] * velocity);
-    if (keys['a'] || joystick?.left) camera.position = camera.position.map((v, i) => v - right[i] * velocity);
-    if (keys['d'] || joystick?.right) camera.position = camera.position.map((v, i) => v + right[i] * velocity);
+    if (keys['w']) camera.position = camera.position.map((v, i) => v + forward[i] * velocity);
+    if (keys['s']) camera.position = camera.position.map((v, i) => v - forward[i] * velocity);
+    if (keys['a']) camera.position = camera.position.map((v, i) => v - right[i] * velocity);
+    if (keys['d']) camera.position = camera.position.map((v, i) => v + right[i] * velocity);
+
+    if (joystickState.active) {
+        camera.position[0] += right[0] * joystickState.direction[0] * velocity;
+        camera.position[2] += forward[2] * joystickState.direction[1] * velocity;
+    }
 
     // if (keys['w']) {
     //     camera.position[0] += forward[0] * velocity;
@@ -894,21 +899,6 @@ function makeInputDraggable(input, step = 0.1) {
 //mobil 
 
 
-function setupJoystick() {
-    const moveState = { left: false, right: false, up: false, down: false };
-
-    document.getElementById('up').addEventListener('touchstart', () => moveState.up = true);
-    document.getElementById('down').addEventListener('touchstart', () => moveState.down = true);
-    document.getElementById('left').addEventListener('touchstart', () => moveState.left = true);
-    document.getElementById('right').addEventListener('touchstart', () => moveState.right = true);
-
-    ['up', 'down', 'left', 'right'].forEach(dir => {
-        document.getElementById(dir).addEventListener('touchend', () => moveState[dir] = false);
-    });
-
-    return moveState;
-}
-
 function setupTouch() {
     let lastTouchX = null;
     let lastTouchY = null;
@@ -991,4 +981,48 @@ function setupTouch() {
         ];
     }
 
+}
+
+let joystickState = {
+    active: false,
+    angle: 0,
+    distance: 0,
+    direction: [0, 0]
+};
+
+function setupJoystickControl() {
+    const container = document.getElementById("joystick-container");
+    const handle = document.getElementById("joystick-handle");
+    const center = { x: container.offsetWidth / 2, y: container.offsetHeight / 2 };
+
+    container.addEventListener("touchstart", e => {
+        joystickState.active = true;
+    });
+
+    container.addEventListener("touchmove", e => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const rect = container.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+
+        const dx = x - center.x;
+        const dy = y - center.y;
+        const distance = Math.min(Math.sqrt(dx * dx + dy * dy), 40); 
+
+        const angle = Math.atan2(dy, dx);
+        joystickState.angle = angle;
+        joystickState.distance = distance;
+        joystickState.direction = [Math.cos(angle), Math.sin(angle)];
+
+        handle.style.left = `${center.x + Math.cos(angle) * distance - 25}px`;
+        handle.style.top = `${center.y + Math.sin(angle) * distance - 25}px`;
+    }, { passive: false });
+
+    container.addEventListener("touchend", () => {
+        joystickState.active = false;
+        joystickState.direction = [0, 0];
+        handle.style.left = "35px";
+        handle.style.top = "35px";
+    });
 }
