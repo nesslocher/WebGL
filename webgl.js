@@ -622,8 +622,15 @@ function UpdateCamera(dt) {
     if (keys['d']) camera.position = camera.position.map((v, i) => v + right[i] * velocity);
 
     if (joystickState.active) {
-        camera.position[0] += right[0] * joystickState.direction[0] * velocity;
-        camera.position[2] += forward[2] * joystickState.direction[1] * velocity;
+        const angle = camera.yaw;
+        const dx = joystickState.direction[0];
+        const dy = -joystickState.direction[1];
+    
+        const moveX = Math.cos(angle) * dx - Math.sin(angle) * dy;
+        const moveZ = Math.sin(angle) * dx + Math.cos(angle) * dy;
+    
+        camera.position[0] += moveX * velocity;
+        camera.position[2] += moveZ * velocity;
     }
 
     // if (keys['w']) {

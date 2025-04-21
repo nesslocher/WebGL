@@ -129,7 +129,7 @@ html, body {
 #joystick-container {
     position: fixed;
     bottom: 30px;
-    left: 30px;
+    right: 30px;
     width: 120px;
     height: 120px;
     background-color: rgba(255, 255, 255, 0.2);
@@ -146,5 +146,5 @@ html, body {
     position: absolute;
     left: 35px;
     top: 35px;
-    pointer-events: none; /* så den ikke fanger touch */
+    pointer-events: none; 
 }
