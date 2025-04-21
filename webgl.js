@@ -46,6 +46,7 @@ function InitWebGL()
     canvas.height = window.innerHeight;
 
     InitViewport();
+    setupTouch()
 }
 
 function InitViewport()
@@ -883,84 +884,84 @@ function makeInputDraggable(input, step = 0.1) {
 
 //mobil 
 
-let lastTouchX = null;
-let lastTouchY = null;
-let rotationX = 0;
-let rotationY = 0;
+function setupTouch() {
+    let lastTouchX = null;
+    let lastTouchY = null;
+    let rotationX = 0;
+    let rotationY = 0;
 
 
+    let lastDistance = null;
+    let zoom = 1.0;
 
-canvas.addEventListener('touchstart', (e) => {
-    if (e.touches.length === 1) {
-        lastTouchX = e.touches[0].clientX;
-        lastTouchY = e.touches[0].clientY;
-    }
-});
-
-canvas.addEventListener('touchmove', (e) => {
-    if (e.touches.length === 1) {
-        e.preventDefault();
-
-        const touch = e.touches[0];
-        const dx = touch.clientX - lastTouchX;
-        const dy = touch.clientY - lastTouchY;
-
-        rotationX += dx * 0.01;
-        rotationY += dy * 0.01;
-
-        lastTouchX = touch.clientX;
-        lastTouchY = touch.clientY;
-
-        updateRotation(rotationX, rotationY);
-    }
-}, { passive: false });
-
-let lastDistance = null;
-let zoom = 1.0;
-
-canvas.addEventListener('touchmove', (e) => {
-    if (e.touches.length === 2) {
-        e.preventDefault();
-
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (lastDistance !== null) {
-            const delta = distance - lastDistance;
-            zoom += delta * 0.01;
-            zoom = Math.max(0.1, Math.min(zoom, 5.0));
-
-            updateZoom(zoom);
+    canvas.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+            lastTouchX = e.touches[0].clientX;
+            lastTouchY = e.touches[0].clientY;
         }
+    });
 
-        lastDistance = distance;
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+    
+        if (e.touches.length === 1) {
+            const touch = e.touches[0];
+            const dx = touch.clientX - lastTouchX;
+            const dy = touch.clientY - lastTouchY;
+    
+            rotationX += dx * 0.01;
+            rotationY += dy * 0.01;
+    
+            lastTouchX = touch.clientX;
+            lastTouchY = touch.clientY;
+    
+            updateRotation(rotationX, rotationY);
+        }
+    
+        if (e.touches.length === 2) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+    
+            if (lastDistance !== null) {
+                const delta = distance - lastDistance;
+                zoom += delta * 0.01;
+                zoom = Math.max(0.1, Math.min(zoom, 5.0));
+    
+                updateZoom(zoom);
+            }
+    
+            lastDistance = distance;
+        }
+    }, { passive: false });
+
+
+
+    canvas.addEventListener('touchend', () => {
+        lastDistance = null;
+    });
+
+
+
+    function updateRotation(rotX, rotY) {
+        camera.yaw = rotX;
+
+        const maxPitch = Math.PI / 2 - 0.01;
+        camera.pitch = Math.max(-maxPitch, Math.min(maxPitch, -rotY));
     }
-}, { passive: false });
 
-canvas.addEventListener('touchend', () => {
-    lastDistance = null;
-});
+    function updateZoom(zoomLevel) {
+        const forward = normalize([
+            Math.cos(camera.pitch) * Math.sin(camera.yaw),
+            Math.sin(camera.pitch),
+            -Math.cos(camera.pitch) * Math.cos(camera.yaw)
+        ]);
 
+        camera.position = [
+            forward[0] * -zoomLevel,
+            forward[1] * -zoomLevel,
+            forward[2] * -zoomLevel
+        ];
+    }
 
-
-function updateRotation(rotX, rotY) {
-    camera.yaw = rotX;
-
-    const maxPitch = Math.PI / 2 - 0.01;
-    camera.pitch = Math.max(-maxPitch, Math.min(maxPitch, -rotY));
-}
-
-function updateZoom(zoomLevel) {
-    const forward = normalize([
-        Math.cos(camera.pitch) * Math.sin(camera.yaw),
-        Math.sin(camera.pitch),
-        -Math.cos(camera.pitch) * Math.cos(camera.yaw)
-    ]);
-
-    camera.position = [
-        forward[0] * -zoomLevel,
-        forward[1] * -zoomLevel,
-        forward[2] * -zoomLevel
-    ];
 }
