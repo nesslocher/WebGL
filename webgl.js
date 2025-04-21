@@ -899,6 +899,8 @@ canvas.addEventListener('touchstart', (e) => {
 
 canvas.addEventListener('touchmove', (e) => {
     if (e.touches.length === 1) {
+        e.preventDefault();
+
         const touch = e.touches[0];
         const dx = touch.clientX - lastTouchX;
         const dy = touch.clientY - lastTouchY;
@@ -909,16 +911,17 @@ canvas.addEventListener('touchmove', (e) => {
         lastTouchX = touch.clientX;
         lastTouchY = touch.clientY;
 
-
         updateRotation(rotationX, rotationY);
     }
-});
+}, { passive: false });
 
 let lastDistance = null;
 let zoom = 1.0;
 
 canvas.addEventListener('touchmove', (e) => {
     if (e.touches.length === 2) {
+        e.preventDefault();
+
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const distance = Math.sqrt(dx * dx + dy * dy);
@@ -926,15 +929,38 @@ canvas.addEventListener('touchmove', (e) => {
         if (lastDistance !== null) {
             const delta = distance - lastDistance;
             zoom += delta * 0.01;
-            zoom = Math.max(0.1, Math.min(zoom, 5.0)); 
+            zoom = Math.max(0.1, Math.min(zoom, 5.0));
 
-            updateZoom(zoom); 
+            updateZoom(zoom);
         }
 
         lastDistance = distance;
     }
-});
+}, { passive: false });
 
 canvas.addEventListener('touchend', () => {
     lastDistance = null;
 });
+
+
+
+function updateRotation(rotX, rotY) {
+    camera.yaw = rotX;
+
+    const maxPitch = Math.PI / 2 - 0.01;
+    camera.pitch = Math.max(-maxPitch, Math.min(maxPitch, -rotY));
+}
+
+function updateZoom(zoomLevel) {
+    const forward = normalize([
+        Math.cos(camera.pitch) * Math.sin(camera.yaw),
+        Math.sin(camera.pitch),
+        -Math.cos(camera.pitch) * Math.cos(camera.yaw)
+    ]);
+
+    camera.position = [
+        forward[0] * -zoomLevel,
+        forward[1] * -zoomLevel,
+        forward[2] * -zoomLevel
+    ];
+}
