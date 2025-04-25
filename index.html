@@ -17,7 +17,6 @@
 
             attribute vec3 Pos;
             attribute vec3 Color;
-            varying vec3 vColor;
 
             uniform mat4 Model;
             uniform mat4 View;
@@ -27,6 +26,7 @@
 
             void main() {
                 gl_Position = Projection * View * Model * vec4(Pos, 1.0);
+                gl_PointSize = 10.0;
                 vertexColor = Color;
             }
 
@@ -38,6 +38,7 @@
             varying vec3 vertexColor;
             void main(){
                 gl_FragColor= vec4(vertexColor, 1.0);
+        
             }
         </textarea>
         

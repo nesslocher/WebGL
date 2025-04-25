@@ -2,7 +2,8 @@ var gl;
 var vertices = [];
 var viewGL = 0;
 let activeVertices = vertices;
-
+let showVertices = false;
+let mainVBO = null;
 
 let hasLogged = false;
 let canvas;
@@ -179,7 +180,8 @@ function CreateGeometryBuffers(program)
 
 function CreateVBO(program, vert)
 {
-    let vbo= gl.createBuffer();
+    mainVBO = gl.createBuffer();
+    let vbo = mainVBO;
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
     gl.bufferData(gl.ARRAY_BUFFER, vert, gl.STATIC_DRAW);
     const s = 6 * Float32Array.BYTES_PER_ELEMENT; 
@@ -210,6 +212,10 @@ function Render() {
     const viewMatrix = lookAtFromYawPitch(camera.position, camera.yaw, camera.pitch);
     gl.uniformMatrix4fv(viewGL, false, new Float32Array(viewMatrix));
 
+    //vertex tool
+    const checkbox = document.getElementById('showVertices');
+    if (checkbox) showVertices = checkbox.checked; 
+
     
     if (!hasLogged) {
         console.log("Model vertices:", verticesModel.length / 6);
@@ -220,6 +226,7 @@ function Render() {
     
     drawGrid();
     drawModel();
+    if (showVertices) drawVertices();
 
     //vi bruger gl.useProgram(program) i CreateGeometryBuffers() 
     //gl.useProgram(gl.getParameter(gl.CURRENT_PROGRAM));
@@ -427,6 +434,16 @@ function CreateGeometryUI() {
 
 
     document.getElementById('ui').innerHTML =
+
+    '<b>Tools</b><br>' +
+    '<label class="checkbox-container">' +
+    '<input type="checkbox" id="showVertices" class="styled-checkbox"> Vis vertices' +
+    '</label><br>' +
+
+    '<label class="checkbox-container">' +
+    '<input type="checkbox" id="showLocalAxes"> Lokalt koordinatsystem<br><br>' +
+    '</label><br>' +
+
     '<b>Transformation</b><br>' +
     'Scale X: <input type="number" id="scaleX" value="1.0" step="0.1" min="0.1"><br>' +
     'Scale Y: <input type="number" id="scaleY" value="1.0" step="0.1" min="0.1"><br>' +
@@ -676,6 +693,56 @@ function loop(currentTime) {
     requestAnimationFrame(loop);
 }
 
+
+
+function drawLocalAxes(modelMatrix) {
+
+    //de starter alle i 0,0,0 og derefter bevæg dig ud i de henholdvise akser 
+    const axisVertices = [  
+        0, 0, 0,    1, 0, 0,
+        1, 0, 0,    1, 0, 0, 
+
+        0, 0, 0,    0, 1, 0,
+        0, 1, 0,    0, 1, 0,
+        
+        0, 0, 0,    0, 0, 1,
+        0, 0, 1,    0, 0, 1,
+    ];
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(axisVertices), gl.STATIC_DRAW);
+
+    const stride = 6 * Float32Array.BYTES_PER_ELEMENT;
+    const offsetColor = 3 * Float32Array.BYTES_PER_ELEMENT;
+
+    const posLoc = gl.getAttribLocation(gl.getParameter(gl.CURRENT_PROGRAM), 'Pos');
+    const colLoc = gl.getAttribLocation(gl.getParameter(gl.CURRENT_PROGRAM), 'Color');
+
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(posLoc);
+
+    gl.vertexAttribPointer(colLoc, 3, gl.FLOAT, false, stride, offsetColor);
+    gl.enableVertexAttribArray(colLoc);
+
+    gl.uniformMatrix4fv(modelGL, false, new Float32Array(modelMatrix));
+    gl.drawArrays(gl.LINES, 0, 6);
+
+}
+
+
+function drawVertices() {
+    const identity = identityMatrix();
+    gl.uniformMatrix4fv(modelGL, false, new Float32Array(identity));
+
+    const vertexCount = verticesModel.length / 6;
+    const groundCount = verticesGround.length / 6;
+    const first = groundCount;
+
+    gl.drawArrays(gl.POINTS, first, vertexCount);
+}
+
+
 //skaleringsmatrix
 function scalingMatrix(sx, sy, sz) {
     return [
@@ -852,6 +919,21 @@ function drawModel() {
 
 
     gl.uniformMatrix4fv(modelGL, false, new Float32Array(modelMatrix));
+
+
+
+    if (document.getElementById('showLocalAxes')?.checked) {
+        drawLocalAxes(modelMatrix);
+    
+     
+        gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
+    
+        const stride = 6 * Float32Array.BYTES_PER_ELEMENT;
+        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+        gl.enableVertexAttribArray(1);
+    }
 
     const groundVerticesCount = verticesGround.length / 6;
     gl.drawArrays(gl.TRIANGLES, groundVerticesCount, verticesModel.length / 6);
