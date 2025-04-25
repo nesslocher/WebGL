@@ -7,6 +7,7 @@ let mainVBO = null;
 
 let hasLogged = false;
 let canvas;
+let faceList = []; 
 
 const camera = {
     position: [0, 0, 3],
@@ -46,6 +47,39 @@ function InitWebGL()
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
+
+    //markering af face (overhovedet ikke optimal ==>  find ud af hvad problemet er med ray cast)
+    canvas.addEventListener('click', (e) => {
+        const mouseX = (e.clientX / canvas.width) * 2 - 1;
+        const mouseY = 1 - (e.clientY / canvas.height) * 2;
+    
+        const inverseViewProj = inverseMatrix4x4(
+            multiply4x4(
+                lookAtFromYawPitch(camera.position, camera.yaw, camera.pitch),
+                perspective(Math.PI / 3, canvas.width / canvas.height, 0.1, 100)
+            )
+        );
+        
+    
+        const rayStart = unproject([mouseX, mouseY, -1], inverseViewProj);
+        const rayEnd   = unproject([mouseX, mouseY,  1], inverseViewProj);
+    
+        const rayDir = normalize([
+            rayEnd[0] - rayStart[0],
+            rayEnd[1] - rayStart[1],
+            rayEnd[2] - rayStart[2]
+        ]);
+    
+        for (let face of faceList) {
+            if (rayIntersectsQuad(rayStart, rayDir, face.vertices)) {
+                face.selected = !face.selected; 
+                vertices = verticesGround.concat(verticesModel);
+                CreateVBO(gl.getParameter(gl.CURRENT_PROGRAM), new Float32Array(vertices)); 
+                console.log("Face selected:", face);
+                break;
+            }
+        }
+    });
     
     setupJoystickControl();
     setupTouch();
@@ -147,15 +181,15 @@ function ValidateShaderProgram(p)
     return true;
 }
 
-function CreateGeometryBuffers(program)
-{
+function CreateGeometryBuffers(program) {
 
     verticesGround = [];
     verticesModel = [];
+    faceList = [];
 
     console.log("verticesModel før reset:", verticesModel.length);
-    verticesModel.splice(0, verticesModel.length);
 
+    verticesModel.splice(0, verticesModel.length);
     activeVertices = verticesModel;
     CreateGeometryUI();
 
@@ -178,6 +212,8 @@ function CreateGeometryBuffers(program)
     Render();
 }
 
+
+
 function CreateVBO(program, vert)
 {
     mainVBO = gl.createBuffer();
@@ -197,6 +233,9 @@ function CreateVBO(program, vert)
     gl.enableVertexAttribArray(c); 
 }
 
+
+
+
 function Render() {
     gl.clearColor(0.0, 0.2, 0.0, 0.5); 
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); 
@@ -211,6 +250,7 @@ function Render() {
 
     const viewMatrix = lookAtFromYawPitch(camera.position, camera.yaw, camera.pitch);
     gl.uniformMatrix4fv(viewGL, false, new Float32Array(viewMatrix));
+
 
     //vertex tool
     const checkbox = document.getElementById('showVertices');
@@ -230,7 +270,6 @@ function Render() {
 
     //vi bruger gl.useProgram(program) i CreateGeometryBuffers() 
     //gl.useProgram(gl.getParameter(gl.CURRENT_PROGRAM));
-
 }
 
 function AddVertex(x,y,z,r,g,b)
@@ -256,10 +295,10 @@ function AddTriangle(x1,y1,z1,r1,g1,b1,
     AddVertex(x3,y3,z3,r3,g3,b3);
 }
 
-function AddQuad(x1,y1,z1,r1,g1,b1,
-                 x2,y2,z2,r2,g2,b2,
-                 x3,y3,z3,r3,g3,b3,
-                 x4,y4,z4,r4,g4,b4)
+function AddQuad(x1, y1, z1,   r1,g1,b1,
+                 x2, y2, z2,   r2,g2,b2,
+                 x3, y3, z3,   r3,g3,b3,
+                 x4, y4, z4,   r4,g4,b4)
              {
          AddTriangle(x1, y1, z1, r1, g1, b1,
                      x2, y2, z2, r2, g2, b2,
@@ -267,31 +306,44 @@ function AddQuad(x1,y1,z1,r1,g1,b1,
 
          AddTriangle(x1, y1, z1, r1, g1, b1, 
                      x3, y3, z3, r3, g3, b3,
-                     x4, y4, z4, r4, g4, b4);           
-             }
+                     x4, y4, z4, r4, g4, b4);   
+                     
+        faceList.push({
+            vertices: [
+                [x1, y1, z1],
+                [x2, y2, z2],
+                [x3, y3, z3],
+                [x4, y4, z4]
+            ],
+            selected: false
+        });
+    }
 
-function CreateTriangle(width, height)
+function CreateTriangle(width, height, depth) {
+    
+    const w = width * 0.5;
+    const h = height * 0.5;
+    const d = depth * 0.0;
+
+    AddTriangle( 0.0, h, d,    1.0, 0.0, 0.0,
+                -w,  -h, d,    0.0, 1.0, 0.0,
+                 w,  -h, d,    0.0, 0.0, 1.0); 
+}
+
+function CreateQuad(width, height, depth)
 {
     const w = width * 0.5;
     const h = height * 0.5;
+    const d = depth * 0.0;
 
-    AddTriangle(0.0, h, 0.0, 1.0, 0.0, 0.0,
-                -w,  -h, 0.0, 0.0, 1.0, 0.0,
-                 w,  -h, 0.0, 0.0, 0.0, 1.0); 
+    AddQuad(-w, h, d,   1.0, 0.0, 0.0,
+            -w,-h, d,   0.0, 1.0, 0.0,
+             w,-h, d,   0.0, 0.0, 1.0,
+             w, h, d,   1.0, 1.0, 0.0);
 }
 
-function CreateQuad(width, height)
-{
-    const w = width * 0.5;
-    const h = height * 0.5;
 
-    AddQuad(-w, h, 0.0, 1.0, 0.0, 0.0,
-            -w,-h, 0.0, 0.0, 1.0, 0.0,
-             w,-h, 0.0, 0.0, 0.0, 1.0,
-             w, h, 0.0, 1.0, 1.0, 0.0);
-}
-
-function CreateBox(width, height, depth, yOffset = 0)
+function CreateBox(width, height, depth)
 {
 
     const w = width * 0.5;
@@ -342,6 +394,44 @@ function CreateBox(width, height, depth, yOffset = 0)
              w,  h, -d, ...YELLOW,
              w,  h,  d, ...YELLOW);
 }
+
+function CreateBlankBox(width, height, depth, color = [0.5, 0.5, 0.5])
+{
+    const w = width * 0.5;
+    const h = height * 0.5;
+    const d = depth * 0.5;
+
+    AddQuad(-w, -h,  d, ...color,
+             w, -h,  d, ...color,
+             w,  h,  d, ...color,
+            -w,  h,  d, ...color);
+
+    AddQuad( w, -h, -d, ...color,
+            -w, -h, -d, ...color,
+            -w,  h, -d, ...color,
+             w,  h, -d, ...color);
+
+    AddQuad(-w,  h,  d, ...color,
+             w,  h,  d, ...color,
+             w,  h, -d, ...color,
+            -w,  h, -d, ...color);
+
+    AddQuad(-w, -h, -d, ...color,
+             w, -h, -d, ...color,
+             w, -h,  d, ...color,
+            -w, -h,  d, ...color);
+
+    AddQuad(-w, -h, -d, ...color,
+            -w, -h,  d, ...color,
+            -w,  h,  d, ...color,
+            -w,  h, -d, ...color);
+
+    AddQuad( w, -h,  d, ...color,
+             w, -h, -d, ...color,
+             w,  h, -d, ...color,
+             w,  h,  d, ...color);
+}
+
 
 
 function CreateSubdividedBox(width, height, depth, divX, divY) {
@@ -460,14 +550,19 @@ function CreateGeometryUI() {
     'Shear XY: <input type="number" id="shXY" value="0.0" step="0.1"><br>' +
     'Shear XZ: <input type="number" id="shXZ" value="0.0" step="0.1"><br>';
 
+
+
     let e = document.getElementById('shape');
     switch(e.selectedIndex) {
-        case 0: CreateTriangle(w, h); break;
-        case 1: CreateQuad(w, h); break;
-        case 2: CreateBox(w, h, d); break;
-        case 3: CreateSubdividedBox(w, h, d, divX, divY); break;
+        case 0: CreateTriangle(w, h, d); break;
+        case 1: CreateQuad(w, h, d); break;
+        case 2: CreateBlankBox(w, h, d); break; 
+        case 3: CreateBox(w, h, d); break;
+        case 4: CreateSubdividedBox(w, h, d, divX, divY); break;
     }
 
+
+    
     [
         { id: 'scaleX', step: 0.01 },
         { id: 'scaleY', step: 0.01 },
@@ -490,120 +585,12 @@ function CreateGeometryUI() {
 
 
 
-//projectionMatrix
-function perspective(fov, aspect, near, far) {
-    const f = 1.0 / Math.tan(fov / 2);
-    const rangeInv = 1 / (near - far);
 
-    return [
-        f / aspect, 0, 0, 0,
-        0, f, 0, 0,
-        0, 0, (near + far) * rangeInv, -1,
-        0, 0, 2 * near * far * rangeInv, 0
-    ];
-}
-
-
-//viewMatrix
-function lookAtFromYawPitch(position, yaw, pitch) {
-
-    //funktioner til at finde tallene i vektoren 
-                                                 //feks. kigge direkte op 
-    const cosPitch = Math.cos(pitch);            //Math.sin(pitch) = 1
-    const sinPitch = Math.sin(pitch);            //Math.cos(pitch) = 0
-
-    const cosYaw = Math.cos(yaw);
-    const sinYaw = Math.sin(yaw);
-
-    //vektoren der afgører retning kameraet vender, altså -Z akse
-    const forward = [ 
-        cosPitch * sinYaw,                       //x
-        sinPitch,                                //y
-        -cosPitch * cosYaw                       //z
-    ];
-
-    //vektoren der afgører retning af x aksen 
-    const right = normalize([
-        Math.cos(yaw),
-        0,
-        Math.sin(yaw)
-    ]);
-
-
-    //up vektoren - vi sikrer at alle tre akser (right, up, forward) er et ortogonalt koordinatsystem
-    const up = normalize(cross(right, forward));   
-
-    return [
-        //x           //y                             //z
-        right[0],    up[0],                        -forward[0],            0,
-        right[1],    up[1],                        -forward[1],            0,
-        right[2],    up[2],                        -forward[2],            0,
-
-        -dot(right, position), -dot(up, position), dot(forward, position), 1
-        //for at lave matrixmultiplikationen finder vi prikpunktet af kameraets lokale koordinater og kameraets position 
-    ];
-
-
-
-    
-    // //rotation
-    // const rotationMatrix = [
-    //     right[0], up[0], -forward[0], 0,
-    //     right[1], up[1], -forward[1], 0,
-    //     right[2], up[2], -forward[2], 0,
-    //     0,        0,      0,          1
-    // ];
-
-    // //translation
-    // const translationMatrix = [
-    //     1, 0, 0, -position[0],
-    //     0, 1, 0, -position[1],
-    //     0, 0, 1, -position[2],
-    //     0, 0, 0, 1
-    // ];
-
-    // //matrixmultiplikationen
-    // return multiply4x4(rotationMatrix, translationMatrix);
-}
-
-//rotationsMatrix
-function rotationXMatrix(angle) {
-    const c = Math.cos(angle);
-    const s = Math.sin(angle);
-    return [
-        1, 0, 0, 0,
-        0, c, s, 0,
-        0, -s, c, 0,
-        0, 0, 0, 1
-    ];
-}
-
-function rotationYMatrix(angle) {
-    const c = Math.cos(angle);
-    const s = Math.sin(angle);
-    return [
-        c, 0, -s, 0,
-        0, 1, 0, 0,
-        s, 0, c, 0,
-        0, 0, 0, 1
-    ];
-}
-
-function rotationZMatrix(angle) {
-    const c = Math.cos(angle);
-    const s = Math.sin(angle);
-    return [
-        c, s, 0, 0,
-        -s, c, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-    ];
-}
 
 //bevægelsesfunktion /copy viewMatrix
 function UpdateCamera(dt) {
 
-    const speed = 2.0;
+    const speed = 4.0;
     const velocity = speed * dt;
 
     const cosPitch = Math.cos(camera.pitch);
@@ -693,8 +680,6 @@ function loop(currentTime) {
     requestAnimationFrame(loop);
 }
 
-
-
 function drawLocalAxes(modelMatrix) {
 
     //de starter alle i 0,0,0 og derefter bevæg dig ud i de henholdvise akser 
@@ -730,10 +715,9 @@ function drawLocalAxes(modelMatrix) {
 
 }
 
-
 function drawVertices() {
-    const identity = identityMatrix();
-    gl.uniformMatrix4fv(modelGL, false, new Float32Array(identity));
+    const matrix = modelMatrix();
+    gl.uniformMatrix4fv(modelGL, false, new Float32Array(matrix));
 
     const vertexCount = verticesModel.length / 6;
     const groundCount = verticesGround.length / 6;
@@ -743,7 +727,100 @@ function drawVertices() {
 }
 
 
-//skaleringsmatrix
+
+
+
+                                                     //matricer
+
+
+//projectionMatrix
+function perspective(fov, aspect, near, far) {
+    const f = 1.0 / Math.tan(fov / 2);
+    const rangeInv = 1 / (near - far);
+
+    return [
+        f / aspect, 0, 0, 0,
+        0, f, 0, 0,
+        0, 0, (near + far) * rangeInv, -1,
+        0, 0, 2 * near * far * rangeInv, 0
+    ];
+}
+
+
+//viewMatrix
+function lookAtFromYawPitch(position, yaw, pitch) {
+
+    //funktioner til at finde tallene i vektoren 
+                                                 //feks. kigge direkte op 
+    const cosPitch = Math.cos(pitch);            //Math.sin(pitch) = 1
+    const sinPitch = Math.sin(pitch);            //Math.cos(pitch) = 0
+
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
+
+    //vektoren der afgører retning kameraet vender, altså -Z akse
+    const forward = [ 
+        cosPitch * sinYaw,                       //x
+        sinPitch,                                //y
+        -cosPitch * cosYaw                       //z
+    ];
+
+    //vektoren der afgører retning af x aksen 
+    const right = normalize([
+        Math.cos(yaw),
+        0,
+        Math.sin(yaw)
+    ]);
+
+
+    //up vektoren - vi sikrer at alle tre akser (right, up, forward) er et ortogonalt koordinatsystem
+    const up = normalize(cross(right, forward));   
+
+    return [
+        //x           //y                             //z
+        right[0],    up[0],                        -forward[0],            0,
+        right[1],    up[1],                        -forward[1],            0,
+        right[2],    up[2],                        -forward[2],            0,
+
+        -dot(right, position), -dot(up, position), dot(forward, position), 1
+        //for at lave matrixmultiplikationen finder vi prikpunktet af kameraets lokale koordinater og kameraets position 
+    ];
+}
+
+//rotationsMatrix
+function rotationXMatrix(angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return [
+        1, 0, 0, 0,
+        0, c, s, 0,
+        0, -s, c, 0,
+        0, 0, 0, 1
+    ];
+}
+
+function rotationYMatrix(angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return [
+        c, 0, -s, 0,
+        0, 1, 0, 0,
+        s, 0, c, 0,
+        0, 0, 0, 1
+    ];
+}
+
+function rotationZMatrix(angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return [
+        c, s, 0, 0,
+        -s, c, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    ];
+}
+
 function scalingMatrix(sx, sy, sz) {
     return [
         sx, 0,  0,  0,
@@ -771,7 +848,80 @@ function shearMatrix(shXY, shXZ, shYX, shYZ, shZX, shZY) {
     ];
 }
 
+//inverseMatrix til håndtering af modsat projectionMatrix (ray cast)  den er bare midlertidig    -      undersøg det lidt nærmere, matematisk 
+function inverseMatrix4x4(m) {
+    const mat = new DOMMatrix([...m]);
+    const inv = mat.inverse();
+    return [
+        inv.m11, inv.m12, inv.m13, inv.m14,
+        inv.m21, inv.m22, inv.m23, inv.m24,
+        inv.m31, inv.m32, inv.m33, inv.m34,
+        inv.m41, inv.m42, inv.m43, inv.m44
+    ];
+}
 
+
+function unproject(screenPos, invViewProjMatrix) {
+    const [x, y, z] = screenPos;
+    const vec = [
+        x,
+        y,
+        z,
+        1.0
+    ];
+
+    
+    const out = [
+        vec[0] * invViewProjMatrix[0]  + vec[1] * invViewProjMatrix[4]  + vec[2] * invViewProjMatrix[8]  + vec[3] * invViewProjMatrix[12],
+        vec[0] * invViewProjMatrix[1]  + vec[1] * invViewProjMatrix[5]  + vec[2] * invViewProjMatrix[9]  + vec[3] * invViewProjMatrix[13],
+        vec[0] * invViewProjMatrix[2]  + vec[1] * invViewProjMatrix[6]  + vec[2] * invViewProjMatrix[10] + vec[3] * invViewProjMatrix[14],
+        vec[0] * invViewProjMatrix[3]  + vec[1] * invViewProjMatrix[7]  + vec[2] * invViewProjMatrix[11] + vec[3] * invViewProjMatrix[15]
+    ];
+
+    return [out[0] / out[3], out[1] / out[3], out[2] / out[3]];
+}
+
+function rayIntersectsQuad(rayOrigin, rayDir, quadVertices) {
+    const [a, b, c, d] = quadVertices;
+
+
+    return rayIntersectsTriangle(rayOrigin, rayDir, a, b, c) ||
+           rayIntersectsTriangle(rayOrigin, rayDir, a, c, d);
+}
+
+function rayIntersectsTriangle(rayOrigin, rayDir, v0, v1, v2) {
+    const EPSILON = 1e-8;
+    const edge1 = [
+        v1[0] - v0[0],
+        v1[1] - v0[1],
+        v1[2] - v0[2]
+    ];
+    const edge2 = [
+        v2[0] - v0[0],
+        v2[1] - v0[1],
+        v2[2] - v0[2]
+    ];
+
+    const h = cross(rayDir, edge2);
+    const a = dot(edge1, h);
+    if (Math.abs(a) < EPSILON) return false;
+
+    const f = 1.0 / a;
+    const s = [
+        rayOrigin[0] - v0[0],
+        rayOrigin[1] - v0[1],
+        rayOrigin[2] - v0[2]
+    ];
+    const u = f * dot(s, h);
+    if (u < 0.0 || u > 1.0) return false;
+
+    const q = cross(s, edge1);
+    const v = f * dot(rayDir, q);
+    if (v < 0.0 || u + v > 1.0) return false;
+
+    const t = f * dot(edge2, q);
+    return t > EPSILON;
+}
 
 
 
@@ -828,6 +978,8 @@ function identityMatrix() {
 
 
 
+
+
                                             //grid
 
 //en enkelt linje (bræddet)
@@ -867,16 +1019,21 @@ function drawGrid() {
     ];
     gl.uniformMatrix4fv(modelGL, false, new Float32Array(identityMatrix));
     const groundVerticesCount = verticesGround.length / 6;
+
+gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
+const stride = 6 * Float32Array.BYTES_PER_ELEMENT;
+gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+gl.enableVertexAttribArray(0);
+gl.enableVertexAttribArray(1);
+
     gl.drawArrays(gl.LINES, 0, groundVerticesCount);
 }
 
 
 
 
-
-
-function drawModel() {
-                                         //henter transformationer fra input
+function modelMatrix() {
     //scale
     const sx = parseFloat(document.getElementById('scaleX').value) || 1;
     const sy = parseFloat(document.getElementById('scaleY').value) || 1;
@@ -897,8 +1054,6 @@ function drawModel() {
     const ry = parseFloat(document.getElementById('rotY').value) * Math.PI / 180;
     const rz = parseFloat(document.getElementById('rotZ').value) * Math.PI / 180;
 
-
-                                       //bygger matricer
     const scaleMatrix = scalingMatrix(sx, sy, sz);
     const shearMatrixLocal = shearMatrix(shXY, shXZ, 0, 0, 0, 0);
     const rotX = rotationXMatrix(rx);
@@ -906,8 +1061,6 @@ function drawModel() {
     const rotZ = rotationZMatrix(rz);
     const translateMatrix = translationMatrix(tx, ty, tz);
 
-
-                                      //bygger endelige model       model = translation * rotZ * rotY * rotX * shear * scale
                                       let modelMatrix = identityMatrix();
                                       modelMatrix = multiply4x4(modelMatrix, scaleMatrix);
                                       modelMatrix = multiply4x4(modelMatrix, shearMatrixLocal);
@@ -916,31 +1069,70 @@ function drawModel() {
                                       modelMatrix = multiply4x4(modelMatrix, rotZ);
                                       modelMatrix = multiply4x4(modelMatrix, translateMatrix);
 
-
-
-    gl.uniformMatrix4fv(modelGL, false, new Float32Array(modelMatrix));
-
-
-
-    if (document.getElementById('showLocalAxes')?.checked) {
-        drawLocalAxes(modelMatrix);
-    
-     
-        gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
-    
-        const stride = 6 * Float32Array.BYTES_PER_ELEMENT;
-        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
-        gl.enableVertexAttribArray(0);
-        gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
-        gl.enableVertexAttribArray(1);
-    }
-
-    const groundVerticesCount = verticesGround.length / 6;
-    gl.drawArrays(gl.TRIANGLES, groundVerticesCount, verticesModel.length / 6);
+    return modelMatrix;
 }
 
 
+function drawModel() {
+    const matrix = modelMatrix();
+    gl.uniformMatrix4fv(modelGL, false, new Float32Array(matrix));
 
+    const shapeType = document.getElementById('shape').selectedIndex;
+    if (shapeType === 0 || shapeType === 1) { 
+        gl.disable(gl.CULL_FACE);
+    } else {
+        gl.enable(gl.CULL_FACE);
+        gl.cullFace(gl.BACK); 
+    }
+
+
+    if (document.getElementById('showLocalAxes')?.checked) {
+        drawLocalAxes(matrix);
+    }
+    
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
+    const stride = 6 * Float32Array.BYTES_PER_ELEMENT;
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+    gl.enableVertexAttribArray(1);
+    
+
+    const groundVerticesCount = verticesGround.length / 6;
+    gl.drawArrays(gl.TRIANGLES, groundVerticesCount, verticesModel.length / 6);
+
+
+    for (let face of faceList) {
+        if (face.selected) {
+            const verts = face.vertices;
+    
+            const highlightVerts = new Float32Array([
+                ...verts[0], 0.0, 1.0, 0.5,
+                ...verts[1], 0.0, 1.0, 0.5,
+                ...verts[2], 0.0, 1.0, 0.5,
+                ...verts[3], 0.0, 1.0, 0.5,
+            ]);
+    
+            const highlightBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, highlightBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, highlightVerts, gl.STREAM_DRAW);
+    
+            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+            gl.enableVertexAttribArray(1);
+
+            gl.drawArrays(gl.LINE_LOOP, 0, 4);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
+            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+            gl.enableVertexAttribArray(0);
+            gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+            gl.enableVertexAttribArray(1);
+        }
+    }
+}
 
 
 
@@ -971,6 +1163,13 @@ document.getElementById('gl').addEventListener('mousemove', function (e) {
     mouseX = e.x;
     mouseY = e.y;
 });
+
+
+
+
+
+
+
 
 function makeInputDraggable(input, step = 0.1) {
     let dragging = false;
@@ -1017,7 +1216,28 @@ function makeInputDraggable(input, step = 0.1) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
                                                                   //mobil 
+
+
+                                                                  
+let joystickState = {
+    active: false,
+    angle: 0,
+    distance: 0,
+    direction: [0, 0]
+};
 
 
 function setupTouch() {
@@ -1059,7 +1279,7 @@ function setupTouch() {
         const touch = e.touches[0];
         if (isInJoystickArea(touch)) {
         return; 
-}
+        }
 
         if (e.touches.length === 1) {
             const touch = e.touches[0];
@@ -1124,12 +1344,6 @@ function setupTouch() {
 
 }
 
-let joystickState = {
-    active: false,
-    angle: 0,
-    distance: 0,
-    direction: [0, 0]
-};
 
 function setupJoystickControl() {
     const container = document.getElementById("joystick-container");
