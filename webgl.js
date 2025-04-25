@@ -54,8 +54,6 @@ function InitWebGL()
 
 function InitViewport()
 {
-    
-
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.clearColor(0.0, 0.4, 0.6, 1.0); 
     gl.enable(gl.DEPTH_TEST); 
@@ -621,17 +619,25 @@ function UpdateCamera(dt) {
     if (keys['d']) camera.position = camera.position.map((v, i) => v + right[i] * velocity);
 
     if (joystickState.active) {
-        const yaw = camera.yaw;
-
+        const forward = normalize([
+            Math.cos(camera.pitch) * Math.sin(camera.yaw),
+            Math.sin(camera.pitch),
+            -Math.cos(camera.pitch) * Math.cos(camera.yaw)
+        ]);
+    
+        const right = normalize([
+            Math.cos(camera.yaw),
+            0,
+            Math.sin(camera.yaw)
+        ]);
 
         const dx = joystickState.direction[0];
         const dy = joystickState.direction[1];
     
-        const moveX = Math.sin(yaw) * dy + Math.cos(yaw) * dx;
-        const moveZ = -Math.cos(yaw) * dy + Math.sin(yaw) * dx;
-    
-        camera.position[0] += moveX * velocity;
-        camera.position[2] += moveZ * velocity;
+        for (let i = 0; i < 3; i++) {
+            camera.position[i] += right[i] * dx * velocity;
+            camera.position[i] += -forward[i] * dy * velocity;
+        }
     }
 
     // if (keys['w']) {
@@ -741,6 +747,16 @@ function multiply4x4(a, b) {
     return out;
 }
 
+function identityMatrix() {
+    return [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    ];
+}
+
+
 
 
 
@@ -788,9 +804,12 @@ function drawGrid() {
 }
 
 
-//alt det du havde i Render
-function drawModel() {
 
+
+
+
+function drawModel() {
+                                         //henter transformationer fra input
     //scale
     const sx = parseFloat(document.getElementById('scaleX').value) || 1;
     const sy = parseFloat(document.getElementById('scaleY').value) || 1;
@@ -811,25 +830,36 @@ function drawModel() {
     const ry = parseFloat(document.getElementById('rotY').value) * Math.PI / 180;
     const rz = parseFloat(document.getElementById('rotZ').value) * Math.PI / 180;
 
-    const modelScale = scalingMatrix(sx, sy, sz);
-    const modelShear = shearMatrix(shXY, shXZ, 0, 0, 0, 0);
-    const modelRotX = rotationXMatrix(rx);
-    const modelRotY = rotationYMatrix(ry);
-    const modelRotZ = rotationZMatrix(rz);
-    const modelTrans = translationMatrix(tx, ty, tz);
 
-    let modelMatrix = modelScale;
-    modelMatrix = multiply4x4(modelRotX, modelMatrix);
-    modelMatrix = multiply4x4(modelRotY, modelMatrix);
-    modelMatrix = multiply4x4(modelRotZ, modelMatrix);
-    modelMatrix = multiply4x4(modelShear, modelMatrix);
-    modelMatrix = multiply4x4(modelTrans, modelMatrix);
+                                       //bygger matricer
+    const scaleMatrix = scalingMatrix(sx, sy, sz);
+    const shearMatrixLocal = shearMatrix(shXY, shXZ, 0, 0, 0, 0);
+    const rotX = rotationXMatrix(rx);
+    const rotY = rotationYMatrix(ry);
+    const rotZ = rotationZMatrix(rz);
+    const translateMatrix = translationMatrix(tx, ty, tz);
+
+
+                                      //bygger endelige model       model = translation * rotZ * rotY * rotX * shear * scale
+                                      let modelMatrix = identityMatrix();
+                                      modelMatrix = multiply4x4(modelMatrix, scaleMatrix);
+                                      modelMatrix = multiply4x4(modelMatrix, shearMatrixLocal);
+                                      modelMatrix = multiply4x4(modelMatrix, rotX);
+                                      modelMatrix = multiply4x4(modelMatrix, rotY);
+                                      modelMatrix = multiply4x4(modelMatrix, rotZ);
+                                      modelMatrix = multiply4x4(modelMatrix, translateMatrix);
+
+
 
     gl.uniformMatrix4fv(modelGL, false, new Float32Array(modelMatrix));
 
     const groundVerticesCount = verticesGround.length / 6;
     gl.drawArrays(gl.TRIANGLES, groundVerticesCount, verticesModel.length / 6);
 }
+
+
+
+
 
 
 
@@ -919,16 +949,36 @@ function setupTouch() {
     let lastDistance = null;
     let zoom = 1.0;
 
+    function isInJoystickArea(touch) {
+        const rect = document.getElementById("joystick-container").getBoundingClientRect();
+        return (
+            touch.clientX >= rect.left &&
+            touch.clientX <= rect.right &&
+            touch.clientY >= rect.top &&
+            touch.clientY <= rect.bottom
+        );
+    }
+
     canvas.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 1) {
-            lastTouchX = e.touches[0].clientX;
-            lastTouchY = e.touches[0].clientY;
+        for (let i = 0; i < e.touches.length; i++) {
+            const t = e.touches[i];
+            if (!isInJoystickArea(t)) {
+                lastTouchX = t.clientX;
+                lastTouchY = t.clientY;
+                break;
+            }
         }
     });
+    
 
     canvas.addEventListener('touchmove', (e) => {
         e.preventDefault();
     
+        const touch = e.touches[0];
+        if (isInJoystickArea(touch)) {
+        return; 
+}
+
         if (e.touches.length === 1) {
             const touch = e.touches[0];
             const dx = touch.clientX - lastTouchX;
