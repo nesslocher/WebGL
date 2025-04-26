@@ -180,6 +180,20 @@ html, body {
     transform: rotate(45deg);
 }
 
+#ui .transform-grid {
+    display: grid;
+    grid-template-columns: auto 60px 60px 60px;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.5rem;
+}
+
+#ui .transform-grid > div {
+    color: #ccc;
+    font-weight: bold;
+    text-align: center;
+}
+
 
 @media screen {
     

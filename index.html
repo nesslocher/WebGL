@@ -17,17 +17,21 @@
 
             attribute vec3 Pos;
             attribute vec3 Color;
+            attribute vec2 UV;
 
             uniform mat4 Model;
             uniform mat4 View;
             uniform mat4 Projection;
 
             varying vec3 vertexColor;
+            varying vec2 uv;
 
             void main() {
                 gl_Position = Projection * View * Model * vec4(Pos, 1.0);
                 gl_PointSize = 10.0;
                 vertexColor = Color;
+
+                uv = UV;
             }
 
     
@@ -35,10 +39,23 @@
         
         <textarea id="fs" spellcheck="false">
             precision mediump float;
+            
             varying vec3 vertexColor;
-            void main(){
-                gl_FragColor= vec4(vertexColor, 1.0);
-        
+            varying vec2 uv;
+
+            uniform sampler2D Texture;
+            uniform vec4 Display;
+
+            
+
+            void main() {
+                vec4 texColor = texture2D(Texture, uv);
+            
+                if (Display.w > 0.5) {
+                    gl_FragColor = texColor; // Vis tekstur
+                } else {
+                    gl_FragColor = vec4(vertexColor, 1.0); // Vis vertex farve
+                }
             }
         </textarea>
         
@@ -51,11 +68,12 @@
         </select>
 
 
-    
+        
 
         <div id="joystick-container">
             <div id="joystick-handle"></div>
         </div>
+
 
         <div id="ui">Generate UI for geometry here</div>
 
