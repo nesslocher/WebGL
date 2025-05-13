@@ -4,6 +4,11 @@ var viewGL = 0;
 let activeVertices = vertices;
 let showVertices = false;
 let mainVBO = null;
+let verticesModel = [];
+let verticesGround = [];
+
+let twistGL; 
+let normalMatrixGL;
 
 //uv 
 var textures = [];
@@ -13,7 +18,6 @@ var displayGL = 0;
 
 let hasLogged = false;
 let canvas;
-let faceList = []; 
 
 const camera = {
     position: [0, 0, 3],
@@ -33,13 +37,14 @@ window.addEventListener('keyup', (e) => {
 });
 
 
-
 function InitWebGL()
 {
 
-    requestAnimationFrame(loop);
+    canvas = document.getElementById('gl');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
-
+    //vi aktiverer webGL
     gl= document.getElementById('gl').getContext('webgl') ||
         document.getElementById('gl').getContext('experimental-webgl');
 
@@ -49,63 +54,12 @@ function InitWebGL()
         return;
     }
 
-    canvas = document.getElementById('gl');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-
-
-    //markering af face (overhovedet ikke optimal ==>  find ud af hvad problemet er med ray cast)  
-    canvas.addEventListener('click', (e) => {
-        const mouseX = (e.clientX / canvas.width) * 2 - 1;
-        const mouseY = 1 - (e.clientY / canvas.height) * 2;
-    
-        const viewMatrix = lookAtFromYawPitch(camera.position, camera.yaw, camera.pitch);
-        const projectionMatrix = perspective(Math.PI / 3, canvas.width / canvas.height, 0.1, 100);
-        const inverseViewProj = inverseMatrix4x4(multiply4x4(projectionMatrix, viewMatrix));
-    
-        
-
-        const rayStart = unproject([mouseX, mouseY, -1], inverseViewProj);
-        const rayEnd = unproject([mouseX, mouseY, 1], inverseViewProj);
-        const rayDir = normalize([
-            rayEnd[0] - rayStart[0],
-            rayEnd[1] - rayStart[1],
-            rayEnd[2] - rayStart[2]
-        ]);
-    
-        const modelMat = modelMatrix();
-    
-        let closestFace = null;
-        let closestT = Infinity;
-    
-        for (let face of faceList) {
-            const transformedVerts = face.vertices.map(v => transformVec3(v, modelMat));
-            
-            const t = rayIntersectsQuadDistance(rayStart, rayDir, transformedVerts);
-    
-            if (t !== null && t < closestT) {
-                closestT = t;
-                closestFace = face;
-            }
-        }
-    
-    
-        const maxDistance = 1000.0;
-
-        if (closestFace !== null && closestT < maxDistance) {
-           closestFace.selected = !closestFace.selected;
-           console.log("Selected face:", closestFace);
-        }
-
-        Render();
-    });
-    
-    
+    requestAnimationFrame(loop);
     
     setupJoystickControl();
     setupTouch();
     InitViewport();
-
+    Update();
 }
 
 function InitViewport()
@@ -125,7 +79,11 @@ function InitShaders()
     const vertex = InitVertexShader();
     const fragment = InitFragmentShader();
 
-
+    if (!vertex || !fragment) {
+        console.error("Shader compile failed, skipping program creation.");
+        return;
+    }
+    //
     let program = InitShaderProgram(vertex, fragment);
 
     if (!ValidateShaderProgram(program))
@@ -171,6 +129,7 @@ function InitFragmentShader()
     return fs;
 }
 
+//lav shader programmet (vs fs)
 function InitShaderProgram(vs, fs)
 {
     let p = gl.createProgram();
@@ -202,33 +161,37 @@ function ValidateShaderProgram(p)
     return true;
 }
 
-function CreateGeometryBuffers(program) {
-
-    verticesGround = [];
-    verticesModel = [];
-    faceList = [];
-
+function CreateGeometryBuffers(program) 
+{
     console.log("verticesModel før reset:", verticesModel.length);
 
-    verticesModel.splice(0, verticesModel.length);
+
+    verticesModel.splice(0, verticesModel.length); //tømmer array men gemmer referencen til samme array 
     activeVertices = verticesModel;
     CreateGeometryUI();
 
     activeVertices = verticesGround; 
     CreateGroundGrid(50, 50, 50, 50, -2.0);
 
-    
+    //samler vertex-data til GPU og forbinder dem med shader programmets input
     vertices = verticesGround.concat(verticesModel);
     CreateVBO(program, new Float32Array(vertices));
 
+    
+
+    // --------------    shader program -------------------
     gl.useProgram(program); 
 
     angleGL = gl.getUniformLocation(program, 'Angle');
     viewGL  = gl.getUniformLocation(program, 'View');
     projectionGL = gl.getUniformLocation(program, 'Projection');
     modelGL = gl.getUniformLocation(program, 'Model');
-    
     displayGL = gl.getUniformLocation(program, 'Display');
+    twistGL = gl.getUniformLocation(program, 'Twist');
+    normalMatrixGL = gl.getUniformLocation(program, 'NormalMatrix');
+    lightDirGL = gl.getUniformLocation(program, 'LightDir');
+    useLightingGL = gl.getUniformLocation(program, 'UseLighting');
+    gl.uniform3fv(lightDirGL, [0.0, 0.0, -1.0]); 
 
     LoadTextures([
         'img/tekstur1.jpg',
@@ -236,44 +199,45 @@ function CreateGeometryBuffers(program) {
         'img/tekstur3.jpg',
         'img/tekstur4.jpg'
       ]);
-      
-
-
     gl.uniform4fv(displayGL, new Float32Array(display));
 
 
+
     Render();
+
+    console.log("Active program:", gl.getParameter(gl.CURRENT_PROGRAM));
 }
 
 
 
-function CreateVBO(program, vert)
-{
+function CreateVBO(program, vert) {
     mainVBO = gl.createBuffer();
-    let vbo = mainVBO;
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
     gl.bufferData(gl.ARRAY_BUFFER, vert, gl.STATIC_DRAW);
-    const s = 8 * Float32Array.BYTES_PER_ELEMENT; 
-    
 
-    let p= gl.getAttribLocation(program, 'Pos');
-    gl.vertexAttribPointer(p, 3, gl.FLOAT, gl.FALSE, s, 0); 
-    gl.enableVertexAttribArray(p);
+    const stride = 11 * Float32Array.BYTES_PER_ELEMENT;
 
-    const o = 3 * Float32Array.BYTES_PER_ELEMENT; 
-    let c = gl.getAttribLocation(program, 'Color');
-    gl.vertexAttribPointer(c, 3, gl.FLOAT, gl.FALSE, s, o);
-    gl.enableVertexAttribArray(c); 
+    const locPos = gl.getAttribLocation(program, 'Pos');
+    gl.vertexAttribPointer(locPos, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(locPos);
 
+    const locColor = gl.getAttribLocation(program, 'Color');
+    gl.vertexAttribPointer(locColor, 3, gl.FLOAT, false, stride, 3 * 4);
+    gl.enableVertexAttribArray(locColor);
 
-    //shader attribute: UV
-    const o2 = o * 2;
-    let u = gl.getAttribLocation(program, 'UV');
-    gl.vertexAttribPointer(u,2,gl.FLOAT,gl.FALSE,s,o2);
-    gl.enableVertexAttribArray(u);
+    const locUV = gl.getAttribLocation(program, 'UV');
+    gl.vertexAttribPointer(locUV, 2, gl.FLOAT, false, stride, 6 * 4);
+    gl.enableVertexAttribArray(locUV);
 
+    const locNormal = gl.getAttribLocation(program, 'Normal');
+    gl.vertexAttribPointer(locNormal, 3, gl.FLOAT, false, stride, 8 * 4);
+    gl.enableVertexAttribArray(locNormal);
+
+    ['Pos', 'Color', 'UV', 'Normal'].forEach(name => {
+    const loc = gl.getAttribLocation(program, name);
+    if (loc === -1) console.warn(`Attribute ${name} not found in shader.`);
+});
 }
-
 
 
 
@@ -292,35 +256,53 @@ function Render() {
     const viewMatrix = lookAtFromYawPitch(camera.position, camera.yaw, camera.pitch);
     gl.uniformMatrix4fv(viewGL, false, new Float32Array(viewMatrix));
 
+    // const twistSlider = document.getElementById('twistSlider');
+    // const twistValue = twistSlider ? parseFloat(twistSlider.value) : 0.0;
+    // gl.uniform1f(twistGL, twistValue); 
 
-    //vertex tool
     const checkbox = document.getElementById('showVertices');
     if (checkbox) showVertices = checkbox.checked; 
 
-    
-    if (!hasLogged) {
-        console.log("Model vertices:", verticesModel.length / 8);
-        console.log("Grid vertices:", verticesGround.length / 8);
-        console.log("Total vertices:", vertices.length / 8);
-        hasLogged = true;
-    }
-    
+    //tegn normaler
+    if (document.getElementById('showNormals')?.checked) {
+    drawNormals();
+}
+
     gl.bindTexture(gl.TEXTURE_2D, textures[currentTextureIndex]);
+
+    const model = modelMatrix();
+    //console.log("modelMatrix (raw):", model);
+    gl.uniformMatrix4fv(modelGL, false, new Float32Array(model));
+
+    const normalMatrix = normalMatrixFromModelMatrix(model);
+    //console.log("normal matrix:", normalMatrix.map(x => x.toFixed(2)));
+    gl.uniformMatrix3fv(normalMatrixGL, false, new Float32Array(normalMatrix));
+
+    const lightWorldDir = normalize([0, 0, 1]); 
+    gl.uniform3fv(lightDirGL, lightWorldDir);
 
     drawGrid();
     drawModel();
-    if (showVertices) drawVertices();
 
-    //vi bruger gl.useProgram(program) i CreateGeometryBuffers() 
-    //gl.useProgram(gl.getParameter(gl.CURRENT_PROGRAM));
+    if (showVertices) drawVertices();
+    
+      if (!hasLogged) {
+        console.log("Model vertices:", verticesModel.length / 11);
+        console.log("Grid vertices:", verticesGround.length / 11);
+        console.log("Total vertices:", vertices.length / 11);
+        console.log("modelMatrix (raw):", model);
+        hasLogged = true;
+    }
+
+
 }
 
-function AddVertex( x, y, z, r, g, b, u, v )
+function AddVertex( x, y, z, r, g, b, u, v, nx, ny, nz )
 {
     //const index = vertices.length;
 
     const index = activeVertices.length;
-    activeVertices.length += 8;
+    activeVertices.length += 11;
     activeVertices[index + 0] = x;
     activeVertices[index + 1] = y;
     activeVertices[index + 2] = z;
@@ -329,41 +311,45 @@ function AddVertex( x, y, z, r, g, b, u, v )
     activeVertices[index + 5] = b;
     activeVertices[index + 6] = u;
     activeVertices[index + 7] = v;
+    activeVertices[index + 8] = nx;
+    activeVertices[index + 9] = ny;
+    activeVertices[index + 10] = nz;
 }
 
 function AddTriangle(x1, y1, z1, r1, g1, b1, u1, v1,
                      x2, y2, z2, r2, g2, b2, u2, v2,
-                     x3, y3, z3, r3, g3, b3, u3, v3
-)
-{
-    AddVertex(x1, y1, z1, r1, g1, b1, u1, v1);
-    AddVertex(x2, y2, z2, r2, g2, b2, u2, v2);
-    AddVertex(x3, y3, z3, r3, g3, b3, u3, v3);
+                     x3, y3, z3, r3, g3, b3, u3, v3) {
+
+    const p1 = [x1, y1, z1];
+    const p2 = [x2, y2, z2];
+    const p3 = [x3, y3, z3];
+
+    const normal = computeNormal(p1, p2, p3);
+
+    console.log("Normal for triangle:", normal);
+
+    AddVertex(x1, y1, z1, r1, g1, b1, u1, v1, ...normal);
+    AddVertex(x2, y2, z2, r2, g2, b2, u2, v2, ...normal);
+    AddVertex(x3, y3, z3, r3, g3, b3, u3, v3, ...normal);
 }
 
-function AddQuad(x1, y1, z1,   r1, g1, b1,   u1, v1,
-                 x2, y2, z2,   r2, g2, b2,   u2, v2,
-                 x3, y3, z3,   r3, g3, b3,   u3, v3,
-                 x4, y4, z4,   r4, g4, b4,   u4, v4)
-             {
-         AddTriangle(x1, y1, z1,   r1, g1, b1,  u1, v1,
-                     x2, y2, z2,   r2, g2, b2,  u2, v2,
-                     x3, y3, z3,   r3, g3, b3,  u3, v3);
 
-         AddTriangle(x1, y1, z1,   r1, g1, b1,  u1, v1, 
-                     x3, y3, z3,   r3, g3, b3,  u3, v3,
-                     x4, y4, z4,   r4, g4, b4,  u4, v4);   
-                     
-        faceList.push({
-            vertices: [
-                [x1, y1, z1],
-                [x2, y2, z2],
-                [x3, y3, z3],
-                [x4, y4, z4]
-            ],
-            selected: false
-        });
-    }
+function AddQuad(x1, y1, z1, r1, g1, b1, u1, v1,
+                 x2, y2, z2, r2, g2, b2, u2, v2,
+                 x3, y3, z3, r3, g3, b3, u3, v3,
+                 x4, y4, z4, r4, g4, b4, u4, v4)
+{
+
+    AddTriangle(x1, y1, z1, r1, g1, b1, u1, v1,
+                x3, y3, z3, r3, g3, b3, u3, v3,
+                x2, y2, z2, r2, g2, b2, u2, v2);
+
+
+    AddTriangle(x1, y1, z1, r1, g1, b1, u1, v1,
+                x4, y4, z4, r4, g4, b4, u4, v4,
+                x3, y3, z3, r3, g3, b3, u3, v3);
+}
+
 
 function CreateTriangle(width, height, depth) {
     
@@ -383,20 +369,67 @@ function CreateQuad(width, height, depth)
     const d = depth * 0.0;
 
     AddQuad(-w, h, d,   1.0, 0.0, 0.0,  0.0, 1.0,
-            -w,-h, d,   0.0, 1.0, 0.0,  0.0, 0.0,
-             w,-h, d,   0.0, 0.0, 1.0,  1.0, 0.0,
-             w, h, d,   1.0, 1.0, 0.0,  1.0, 1.0);
+         w, h, d,   1.0, 1.0, 0.0,  1.0, 1.0,
+         w,-h, d,   0.0, 0.0, 1.0,  1.0, 0.0,
+        -w,-h, d,   0.0, 1.0, 0.0,  0.0, 0.0);
+}
+
+//tester ()
+function drawNormals() {
+    const len = 0.2;
+    const normalLines = [];
+
+    for (let i = 0; i < verticesModel.length; i += 11) {
+        const x = verticesModel[i];
+        const y = verticesModel[i + 1];
+        const z = verticesModel[i + 2];
+        const nx = verticesModel[i + 8];
+        const ny = verticesModel[i + 9];
+        const nz = verticesModel[i + 10];
+
+        const x2 = x + nx * len;
+        const y2 = y + ny * len;
+        const z2 = z + nz * len;
+
+        // Start point (green)
+        normalLines.push(x, y, z, 0.0, 1.0, 0.0); 
+        // End point (green)
+        normalLines.push(x2, y2, z2, 0.0, 1.0, 0.0);
+    }
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normalLines), gl.STATIC_DRAW);
+
+    const stride = 6 * Float32Array.BYTES_PER_ELEMENT;
+
+    const posLoc = gl.getAttribLocation(gl.getParameter(gl.CURRENT_PROGRAM), 'Pos');
+    const colLoc = gl.getAttribLocation(gl.getParameter(gl.CURRENT_PROGRAM), 'Color');
+
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(posLoc);
+
+    gl.vertexAttribPointer(colLoc, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+    gl.enableVertexAttribArray(colLoc);
+
+    // Brug samme modelMatrix for at matche objektets transformationer
+    const model = modelMatrix();
+    gl.uniformMatrix4fv(modelGL, false, new Float32Array(model));
+
+    // Slå tekstur og belysning fra for linjerne
+    gl.uniform1i(useLightingGL, 0);
+    gl.uniform4fv(displayGL, new Float32Array([0, 1, 0, 0]));
+
+    gl.drawArrays(gl.LINES, 0, normalLines.length / 6);
 }
 
 
-function CreateBox(width, height, depth)
-{
 
+function CreateBox(width, height, depth) {
     const w = width * 0.5;
     const h = height * 0.5;
     const d = depth * 0.5;
 
-    //kig på farvekoderne
     const RED     = [1.0, 0.0, 0.0];
     const GREEN   = [0.0, 1.0, 0.0];
     const BLUE    = [0.0, 0.0, 1.0];
@@ -404,42 +437,61 @@ function CreateBox(width, height, depth)
     const PURPLE  = [0.5, 0.0, 0.5];
     const YELLOW  = [1.0, 1.0, 0.0];
 
-    //Z positiv
-    AddQuad(-w, -h,  d, ...RED,  0.0, 0.0,
-             w, -h,  d, ...RED,  1.0, 0.0,
-             w,  h,  d, ...RED,  1.0, 1.0,
-            -w,  h,  d, ...RED,  0.0, 1.0); 
+    // Front face (Z+)
+    AddQuadWithNormal(
+        -w, -h,  d, ...RED,    0.0, 0.0,
+        -w,  h,  d, ...RED,    0.0, 1.0,
+         w,  h,  d, ...RED,    1.0, 1.0,
+         w, -h,  d, ...RED,    1.0, 0.0,
+         0, 0, 1 // normal
+    );
 
-    //Z negativ
-    AddQuad( w, -h, -d, ...GREEN, 0.0, 0.0,
-            -w, -h, -d, ...GREEN, 1.0, 0.0,
-            -w,  h, -d, ...GREEN, 1.0, 1.0,
-             w,  h, -d, ...GREEN, 0.0, 1.0);
+    // Back face (Z-)
+    AddQuadWithNormal(
+         w, -h, -d, ...GREEN,  0.0, 0.0,
+         w,  h, -d, ...GREEN,  0.0, 1.0,
+        -w,  h, -d, ...GREEN,  1.0, 1.0,
+        -w, -h, -d, ...GREEN,  1.0, 0.0,
+         0, 0, -1 // normal
+    );
 
-    //Y positiv
-    AddQuad(-w,  h,  d, ...BLUE,  0.0, 0.0,
-             w,  h,  d, ...BLUE,  1.0, 0.0,
-             w,  h, -d, ...BLUE,  1.0, 1.0,
-            -w,  h, -d, ...BLUE,  0.0, 1.0);
+    // Top face (Y+)
+    AddQuadWithNormal(
+        -w,  h,  d, ...BLUE,   0.0, 0.0,
+        -w,  h, -d, ...BLUE,   0.0, 1.0,
+         w,  h, -d, ...BLUE,   1.0, 1.0,
+         w,  h,  d, ...BLUE,   1.0, 0.0,
+         0, 1, 0 // normal
+    );
 
-    //Y -
-    AddQuad(-w, -h, -d, ...ORANGE, 0.0, 0.0, 
-             w, -h, -d, ...ORANGE, 1.0, 0.0,
-             w, -h,  d, ...ORANGE, 1.0, 1.0, 
-            -w, -h,  d, ...ORANGE, 0.0, 1.0); 
+    // Bottom face (Y-)
+    AddQuadWithNormal(
+        -w, -h, -d, ...ORANGE, 0.0, 0.0,
+        -w, -h,  d, ...ORANGE, 0.0, 1.0,
+         w, -h,  d, ...ORANGE, 1.0, 1.0,
+         w, -h, -d, ...ORANGE, 1.0, 0.0,
+         0, -1, 0 // normal
+    );
 
-    //X + 
-    AddQuad(-w, -h, -d, ...PURPLE, 0.0, 0.0, 
-            -w, -h,  d, ...PURPLE, 1.0, 0.0,
-            -w,  h,  d, ...PURPLE, 1.0, 1.0,
-            -w,  h, -d, ...PURPLE, 0.0, 1.0);
+    // Left face (X-)
+    AddQuadWithNormal(
+        -w, -h, -d, ...PURPLE, 0.0, 0.0,
+        -w,  h, -d, ...PURPLE, 0.0, 1.0,
+        -w,  h,  d, ...PURPLE, 1.0, 1.0,
+        -w, -h,  d, ...PURPLE, 1.0, 0.0,
+        -1, 0, 0 // normal
+    );
 
-    //X -
-    AddQuad( w, -h,  d, ...YELLOW, 0.0, 0.0,
-             w, -h, -d, ...YELLOW, 1.0, 0.0,
-             w,  h, -d, ...YELLOW, 1.0, 1.0,
-             w,  h,  d, ...YELLOW, 0.0, 1.0);
+    // Right face (X+)
+    AddQuadWithNormal(
+         w, -h,  d, ...YELLOW, 0.0, 0.0,
+         w,  h,  d, ...YELLOW, 0.0, 1.0,
+         w,  h, -d, ...YELLOW, 1.0, 1.0,
+         w, -h, -d, ...YELLOW, 1.0, 0.0,
+         1, 0, 0 // normal
+    );
 }
+
 
 function CreateBlankBox(width, height, depth, color = [0.5, 0.5, 0.5])
 {
@@ -447,44 +499,56 @@ function CreateBlankBox(width, height, depth, color = [0.5, 0.5, 0.5])
     const h = height * 0.5;
     const d = depth * 0.5;
 
-    AddQuad(-w, -h,  d, ...color,
-             w, -h,  d, ...color,
-             w,  h,  d, ...color,
-            -w,  h,  d, ...color);
+    AddQuad(-w, -h,  d, ...color, 0.0, 0.0,
+             w, -h,  d, ...color, 1.0, 0.0,
+             w,  h,  d, ...color, 1.0, 1.0,
+            -w,  h,  d, ...color, 0.0, 1.0);
 
-    AddQuad( w, -h, -d, ...color,
-            -w, -h, -d, ...color,
-            -w,  h, -d, ...color,
-             w,  h, -d, ...color);
+    AddQuad( w, -h, -d, ...color, 0.0, 0.0,
+            -w, -h, -d, ...color, 1.0, 0.0,
+            -w,  h, -d, ...color, 1.0, 1.0,
+             w,  h, -d, ...color, 0.0, 1.0);
 
-    AddQuad(-w,  h,  d, ...color,
-             w,  h,  d, ...color,
-             w,  h, -d, ...color,
-            -w,  h, -d, ...color);
+    AddQuad(-w,  h,  d, ...color, 0.0, 0.0,
+             w,  h,  d, ...color, 1.0, 0.0,
+             w,  h, -d, ...color, 1.0, 1.0,
+            -w,  h, -d, ...color, 0.0, 1.0);
 
-    AddQuad(-w, -h, -d, ...color,
-             w, -h, -d, ...color,
-             w, -h,  d, ...color,
-            -w, -h,  d, ...color);
+    AddQuad(-w, -h, -d, ...color, 0.0, 0.0,
+             w, -h, -d, ...color, 1.0, 0.0,
+             w, -h,  d, ...color, 1.0, 1.0,
+            -w, -h,  d, ...color, 0.0, 1.0);
 
-    AddQuad(-w, -h, -d, ...color,
-            -w, -h,  d, ...color,
-            -w,  h,  d, ...color,
-            -w,  h, -d, ...color);
+    AddQuad(-w, -h, -d, ...color, 0.0, 0.0,
+            -w, -h,  d, ...color, 1.0, 0.0,
+            -w,  h,  d, ...color, 1.0, 1.0,
+            -w,  h, -d, ...color, 0.0, 1.0);
 
-    AddQuad( w, -h,  d, ...color,
-             w, -h, -d, ...color,
-             w,  h, -d, ...color,
-             w,  h,  d, ...color);
+    AddQuad( w, -h,  d, ...color, 0.0, 0.0,
+             w, -h, -d, ...color, 1.0, 0.0,
+             w,  h, -d, ...color, 1.0, 1.0,
+             w,  h,  d, ...color, 0.0, 1.0);
 }
 
 
 
+function AddQuadWithNormal(
+    x1, y1, z1, r1, g1, b1, u1, v1,
+    x2, y2, z2, r2, g2, b2, u2, v2,
+    x3, y3, z3, r3, g3, b3, u3, v3,
+    x4, y4, z4, r4, g4, b4, u4, v4,
+    nx, ny, nz
+) {
+    AddVertex(x1, y1, z1, r1, g1, b1, u1, v1, nx, ny, nz);
+    AddVertex(x3, y3, z3, r3, g3, b3, u3, v3, nx, ny, nz);
+    AddVertex(x2, y2, z2, r2, g2, b2, u2, v2, nx, ny, nz);
+
+    AddVertex(x1, y1, z1, r1, g1, b1, u1, v1, nx, ny, nz);
+    AddVertex(x4, y4, z4, r4, g4, b4, u4, v4, nx, ny, nz);
+    AddVertex(x3, y3, z3, r3, g3, b3, u3, v3, nx, ny, nz);
+}
+
 function CreateSubdividedBox(width, height, depth, divX, divY) {
-
-    
-
-
     const dx = width / divX;
     const dy = height / divY;
     const dz = depth / divY;
@@ -496,11 +560,9 @@ function CreateSubdividedBox(width, height, depth, divX, divY) {
     const w = width / 2;
     const h = height / 2;
 
-    function CreatePlane(divA, divB, origin, stepA, stepB, invertOrder = false, flipUV = false) {
-        
-
+    function CreatePlane(divA, divB, origin, stepA, stepB, normal, invertOrder = false, flipUV = false) {
         const useLocalUVs = document.getElementById('localUVs')?.checked;
-        
+
         for (let i = 0; i < divA; i++) {
             for (let j = 0; j < divB; j++) {
                 const ax = origin[0] + i * stepA[0] + j * stepB[0];
@@ -511,18 +573,17 @@ function CreateSubdividedBox(width, height, depth, divX, divY) {
                 const by = ay + stepA[1];
                 const bz = az + stepA[2];
 
-                const dx = ax + stepB[0];
-                const dy = ay + stepB[1];
-                const dz = az + stepB[2];
+                const dx_ = ax + stepB[0];
+                const dy_ = ay + stepB[1];
+                const dz_ = az + stepB[2];
 
                 const cx = bx + stepB[0];
                 const cy = by + stepB[1];
                 const cz = bz + stepB[2];
 
                 let u0, v0, u1, v1;
-                
-                if (useLocalUVs) {
 
+                if (useLocalUVs) {
                     u0 = 0;
                     v0 = 0;
                     u1 = 1;
@@ -537,37 +598,43 @@ function CreateSubdividedBox(width, height, depth, divX, divY) {
                 const color = (i + j) % 2 === 0 ? [0, 0.3, 0] : [0, 1, 0];
 
                 if (!invertOrder) {
-                    AddQuad(ax, ay, az, ...color, u0, v0,
-                            bx, by, bz, ...color, u1, v0,
-                            cx, cy, cz, ...color, u1, v1,
-                            dx, dy, dz, ...color, u0, v1);
+                    AddQuadWithNormal(
+                        ax, ay, az, ...color, u0, v0,
+                        bx, by, bz, ...color, u1, v0,
+                        cx, cy, cz, ...color, u1, v1,
+                        dx_, dy_, dz_, ...color, u0, v1,
+                        ...normal
+                    );
                 } else {
-                    AddQuad(ax, ay, az, ...color, u0, v0,
-                            dx, dy, dz, ...color, u1, v0,
-                            cx, cy, cz, ...color, u1, v1,
-                            bx, by, bz, ...color, u0, v1);
+                    AddQuadWithNormal(
+                        ax, ay, az, ...color, u0, v0,
+                        dx_, dy_, dz_, ...color, u1, v0,
+                        cx, cy, cz, ...color, u1, v1,
+                        bx, by, bz, ...color, u0, v1,
+                        ...normal
+                    );
                 }
             }
         }
     }
 
-    // bund
-CreatePlane(divX, divY, [x0, y0,  z0], [dx, 0, 0], [0, dy, 0], false);
+    // Front (+Z)
+    CreatePlane(divX, divY, [x0, y0,  z0], [dx, 0, 0], [0, dy, 0], [0, 0, 1], true, true);
 
-// bagsiden (-Z)              ligger stadigvæk på siden (FIX DET)
-CreatePlane(divX, divY, [x0, y0, -z0], [dx, 0, 0], [0, dy, 0], true, true);
+    // Back (-Z)
+    CreatePlane(divX, divY, [x0, y0, -z0], [dx, 0, 0], [0, dy, 0], [0, 0, -1], false, false);
 
-// top
-CreatePlane(divX, divY, [x0,  h, -z0], [dx, 0, 0], [0, 0, dz], true, true);
+    // Top (+Y)
+    CreatePlane(divX, divY, [x0,  h, -z0], [dx, 0, 0], [0, 0, dz], [0, 1, 0], false, false);
 
-// front
-CreatePlane(divX, divY, [x0, -h, -z0], [dx, 0, 0], [0, 0, dz], false);
+    // Bottom (-Y)
+    CreatePlane(divX, divY, [x0, -h, -z0], [dx, 0, 0], [0, 0, dz], [0, -1, 0], true, true);
 
-// venstre (-X)
-CreatePlane(divY, divX, [-w, y0, -z0], [0, dy, 0], [0, 0, dz], true, true);
+    // Left (-X)
+    CreatePlane(divY, divX, [-w, y0, -z0], [0, dy, 0], [0, 0, dz], [-1, 0, 0], false, false);
 
-// højre (+X)
-CreatePlane(divY, divY, [w, y0, z0], [0, dy, 0], [0, 0, -dz], true, true);
+    // Right (+X)
+    CreatePlane(divY, divX, [ w, y0,  z0], [0, dy, 0], [0, 0, -dz], [1, 0, 0], false, false);
 }
 
 
@@ -614,11 +681,23 @@ function CreateGeometryUI() {
     </label><br><br>
 
     <label class="checkbox-container">
+     <input type="checkbox" id="showNormals" class="styled-checkbox"> Vis normaler
+    </label><br>
+
+
+    <b>Twist Modifier</b><br>
+    <label for="twistSlider">Twist:</label>
+    <input type="range" id="twistSlider" min="-3" max="3" step="0.01" value="0" style="width: 200px;"><br><br>
+
+    <label class="checkbox-container">
     <input type="checkbox" id="localUVs" class="styled-checkbox" onchange="UpdateUVMode();"> Lokal UV på subdivision
     </label><br><br>
 
+    <label class="checkbox-container">
+      Light Color:
+      <input type="color" id="l" value="#f6b73c" onchange="Update();">
+    </label><br><br>
 
-  
     <b>Transformation</b><br>
   
     <div class="transform-grid">
@@ -643,8 +722,6 @@ function CreateGeometryUI() {
     Shear XY: <input type="number" id="shXY" value="0.0" step="0.1"><br>
     Shear XZ: <input type="number" id="shXZ" value="0.0" step="0.1"><br>
   `;
-  
-
 
     let e = document.getElementById('shape');
     switch(e.selectedIndex) {
@@ -758,173 +835,54 @@ function Update() {
 
     const t = document.getElementById('t');
     display[3] = t.checked ? 1.0 : 0.0;
+
+     const l = document.getElementById('l');
+    if (l && l.value.startsWith('#') && l.value.length === 7) {
+        display[0] = parseInt(l.value.substring(1, 3), 16) / 255.0;
+        display[1] = parseInt(l.value.substring(3, 5), 16) / 255.0;
+        display[2] = parseInt(l.value.substring(5, 7), 16) / 255.0;
+    }
+
     
     gl.uniform4fv(displayGL, new Float32Array(display));
-
     Render();
 }
 
 
 
-//bevægelsesfunktion /copy viewMatrix
-function UpdateCamera(dt) {
 
-    const speed = 4.0;
-    const velocity = speed * dt;
+function drawModel() {
 
-    const cosPitch = Math.cos(camera.pitch);
-    const sinPitch = Math.sin(camera.pitch);
-    const cosYaw = Math.cos(camera.yaw);
-    const sinYaw = Math.sin(camera.yaw);
+    gl.uniform1i(useLightingGL, 1);
 
-    const forward = normalize([
-        cosPitch * sinYaw,
-        sinPitch, 
-        -cosPitch * cosYaw
-    ]);
+    const matrix = modelMatrix();
+    gl.uniformMatrix4fv(modelGL, false, new Float32Array(matrix));
 
-    const right = normalize([
-        Math.cos(camera.yaw),
-        0,
-        Math.sin(camera.yaw)
-    ]);
+    // const shapeType = document.getElementById('shape').selectedIndex;
+    // if (shapeType === 0 || shapeType === 1) { 
+    //     gl.disable(gl.CULL_FACE);
+    // } else {
+    //     gl.enable(gl.CULL_FACE);
+    //     gl.cullFace(gl.BACK); 
+    // }
 
-    if (keys[' ']) { 
-        camera.position[1] += velocity;
+
+    if (document.getElementById('showLocalAxes')?.checked) {
+        drawLocalAxes(matrix);
     }
-    if (keys['shift']) {
-        camera.position[1] -= velocity;
-    }
-
-    if (keys['w']) camera.position = camera.position.map((v, i) => v + forward[i] * velocity);
-    if (keys['s']) camera.position = camera.position.map((v, i) => v - forward[i] * velocity);
-    if (keys['a']) camera.position = camera.position.map((v, i) => v - right[i] * velocity);
-    if (keys['d']) camera.position = camera.position.map((v, i) => v + right[i] * velocity);
-
-    if (joystickState.active) {
-        const forward = normalize([
-            Math.cos(camera.pitch) * Math.sin(camera.yaw),
-            Math.sin(camera.pitch),
-            -Math.cos(camera.pitch) * Math.cos(camera.yaw)
-        ]);
     
-        const right = normalize([
-            Math.cos(camera.yaw),
-            0,
-            Math.sin(camera.yaw)
-        ]);
 
-        const dx = joystickState.direction[0];
-        const dy = joystickState.direction[1];
+    gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
+    const stride = 11 * Float32Array.BYTES_PER_ELEMENT;
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+    gl.enableVertexAttribArray(1);
     
-        for (let i = 0; i < 3; i++) {
-            camera.position[i] += right[i] * dx * velocity;
-            camera.position[i] += -forward[i] * dy * velocity;
-        }
-    }
-}
 
+    const groundVerticesCount = verticesGround.length / 11;
+    gl.drawArrays(gl.TRIANGLES, groundVerticesCount, verticesModel.length / 11);
 
-
-                                    //lort
-let lastTime = performance.now();
-
-function loop(currentTime) {
-    const dt = (currentTime - lastTime) / 1000;
-    lastTime = currentTime;
-
-    UpdateCamera(dt);
-    Render();
-
-    requestAnimationFrame(loop);
-}
-
-function UpdateUVMode() {
-    hasLogged = false;
-
-    const shapeType = document.getElementById('shape').selectedIndex;
-    if (shapeType === 4) {  
-
-        verticesModel.splice(0, verticesModel.length);
-        activeVertices = verticesModel;
-
-
-        //genskab modellen/figuren
-        const ew = document.getElementById('w');
-        const w = ew ? parseFloat(ew.value) : 1.0;
-
-        const eh = document.getElementById('h');
-        const h = eh ? parseFloat(eh.value) : 1.0;
-
-        const ed = document.getElementById('d');
-        const d = ed ? parseFloat(ed.value) : 1.0;
-
-        const dx = document.getElementById('dx');
-        const dy = document.getElementById('dy');
-        const divX = dx ? parseInt(dx.value) : 8;
-        const divY = dy ? parseInt(dy.value) : 8;
-
-        CreateSubdividedBox(w, h, d, divX, divY);
-
-        vertices = verticesGround.concat(verticesModel);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-
-        Render();
-    } else {
-        console.log("Local UVs virker kun på subdivided box.");
-    }
-}
-
-
-
-
-
-
-
-
-function drawLocalAxes(modelMatrix) {
-
-    //fjern tekstur
-    gl.uniform4fv(displayGL, new Float32Array([0, 0, 0, 0]));
-
-
-    //de starter alle i 0,0,0 og derefter bevæg dig ud i de henholdvise akser 
-    const axisVertices = [  
-        0, 0, 0,    1, 0, 0,
-        1, 0, 0,    1, 0, 0, 
-
-        0, 0, 0,    0, 1, 0,
-        0, 1, 0,    0, 1, 0,
-        
-        0, 0, 0,    0, 0, 1,
-        0, 0, 1,    0, 0, 1,
-    ];
-
-    const buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(axisVertices), gl.STATIC_DRAW);
-
-    const stride = 6 * Float32Array.BYTES_PER_ELEMENT;
-    const offsetColor = 3 * Float32Array.BYTES_PER_ELEMENT;
-
-    const posLoc = gl.getAttribLocation(gl.getParameter(gl.CURRENT_PROGRAM), 'Pos');
-    const colLoc = gl.getAttribLocation(gl.getParameter(gl.CURRENT_PROGRAM), 'Color');
-
-    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, stride, 0);
-    gl.enableVertexAttribArray(posLoc);
-
-    gl.vertexAttribPointer(colLoc, 3, gl.FLOAT, false, stride, offsetColor);
-    gl.enableVertexAttribArray(colLoc);
-
-    gl.uniformMatrix4fv(modelGL, false, new Float32Array(modelMatrix));
-    gl.drawArrays(gl.LINES, 0, 6);
-
-    //tænd tekstur igen
-    const t = document.getElementById('t');
-    const displayVal = t.checked ? 1.0 : 0.0;
-    gl.uniform4fv(displayGL, new Float32Array([0, 0, 0, displayVal]));
 
 }
 
@@ -932,18 +890,103 @@ function drawVertices() {
     const matrix = modelMatrix();
     gl.uniformMatrix4fv(modelGL, false, new Float32Array(matrix));
 
-    const vertexCount = verticesModel.length / 8;
-    const groundCount = verticesGround.length / 8;
+    const vertexCount = verticesModel.length / 11;
+    const groundCount = verticesGround.length / 11;
     const first = groundCount;
 
     gl.drawArrays(gl.POINTS, first, vertexCount);
 }
 
 
+function drawLocalAxes(modelMatrix) {
+    const savedBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
+    const savedProgram = gl.getParameter(gl.CURRENT_PROGRAM);
+    const savedDisplay = display.slice();
+    const savedUseLighting = gl.getUniform(savedProgram, useLightingGL);
+
+    // Lav ny buffer til akser
+    const axisVertices = [
+        // X-akse (rød)
+        0, 0, 0, 1, 0, 0,
+        1, 0, 0, 1, 0, 0,
+        // Y-akse (grøn)
+        0, 0, 0, 0, 1, 0,
+        0, 1, 0, 0, 1, 0,
+        // Z-akse (blå)
+        0, 0, 0, 0, 0, 1,
+        0, 0, 1, 0, 0, 1
+    ];
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(axisVertices), gl.STATIC_DRAW);
+
+    // Bruger kun Pos og Color (ingen UV, Normal her)
+    const stride = 6 * Float32Array.BYTES_PER_ELEMENT;
+    const posLoc = gl.getAttribLocation(savedProgram, 'Pos');
+    const colLoc = gl.getAttribLocation(savedProgram, 'Color');
+
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(posLoc);
+
+    gl.vertexAttribPointer(colLoc, 3, gl.FLOAT, false, stride, 3 * 4);
+    gl.enableVertexAttribArray(colLoc);
+
+    // Deaktiver lys og tekstur for akselinjer
+    gl.uniform1i(useLightingGL, 0);
+    gl.uniform4fv(displayGL, new Float32Array([0, 0, 0, 0]));
+
+    gl.uniformMatrix4fv(modelGL, false, new Float32Array(modelMatrix));
+    gl.drawArrays(gl.LINES, 0, 6);
+
+    // 💡 Gendan tidligere buffer og uniforms
+    gl.bindBuffer(gl.ARRAY_BUFFER, savedBuffer);
+    gl.uniform4fv(displayGL, new Float32Array(savedDisplay));
+    gl.uniform1i(useLightingGL, savedUseLighting);
+}
 
 
 
-                                                     //matricer
+
+//                                     matricer
+
+function modelMatrix() {
+    //Scale
+    const sx = parseInputFloat('scaleX', 1);
+    const sy = parseInputFloat('scaleY', 1);
+    const sz = parseInputFloat('scaleZ', 1);
+
+    //Translation
+    const tx = parseInputFloat('transX', 0);
+    const ty = parseInputFloat('transY', 0);
+    const tz = parseInputFloat('transZ', 0);
+
+    //Shear
+    const shXY = parseInputFloat('shXY', 0);
+    const shXZ = parseInputFloat('shXZ', 0);
+
+    //Rotation (konverteret til radianer)
+    const rx = parseInputFloat('rotX', 0) * Math.PI / 180;
+    const ry = parseInputFloat('rotY', 0) * Math.PI / 180;
+    const rz = parseInputFloat('rotZ', 0) * Math.PI / 180;
+
+    const scaleMatrix = scalingMatrix(sx, sy, sz);
+    const shearMatrixLocal = shearMatrix(shXY, shXZ, 0, 0, 0, 0);
+    const rotX = rotationXMatrix(rx);
+    const rotY = rotationYMatrix(ry);
+    const rotZ = rotationZMatrix(rz);
+    const translateMatrix = translationMatrix(tx, ty, tz);
+
+    let modelMatrix = identityMatrix();
+    modelMatrix = multiply4x4(modelMatrix, scaleMatrix);
+    modelMatrix = multiply4x4(modelMatrix, shearMatrixLocal);
+    modelMatrix = multiply4x4(modelMatrix, rotX);
+    modelMatrix = multiply4x4(modelMatrix, rotY);
+    modelMatrix = multiply4x4(modelMatrix, rotZ);
+    modelMatrix = multiply4x4(modelMatrix, translateMatrix);
+
+    return modelMatrix;
+}
+
 
 
 //projectionMatrix
@@ -1005,10 +1048,10 @@ function rotationXMatrix(angle) {
     const c = Math.cos(angle);
     const s = Math.sin(angle);
     return [
-        1, 0, 0, 0,
-        0, c, s, 0,
-        0, -s, c, 0,
-        0, 0, 0, 1
+        1,  0,  0,  0,
+        0,  c,  s,  0,
+        0, -s,  c,  0,
+        0,  0,  0,  1
     ];
 }
 
@@ -1061,131 +1104,182 @@ function shearMatrix(shXY, shXZ, shYX, shYZ, shZX, shZY) {
     ];
 }
 
-//inverseMatrix til håndtering af modsat projectionMatrix (ray cast)  den er bare midlertidig    -      undersøg det lidt nærmere, matematisk 
-function inverseMatrix4x4(m) {
-    const mat = new DOMMatrix([...m]);
-    const inv = mat.inverse();
+function extractMat3FromMat4(m) {
     return [
-        inv.m11, inv.m12, inv.m13, inv.m14,
-        inv.m21, inv.m22, inv.m23, inv.m24,
-        inv.m31, inv.m32, inv.m33, inv.m34,
-        inv.m41, inv.m42, inv.m43, inv.m44
+        m[0], m[1], m[2],
+        m[4], m[5], m[6],
+        m[8], m[9], m[10]
+    ];
+}
+
+function inverseMat3(m) {
+    const a = m[0], b = m[1], c = m[2],
+          d = m[3], e = m[4], f = m[5],
+          g = m[6], h = m[7], i = m[8];
+
+    const A = e * i - f * h;
+    const B = -(d * i - f * g);
+    const C = d * h - e * g;
+    const D = -(b * i - c * h);
+    const E = a * i - c * g;
+    const F = -(a * h - b * g);
+    const G = b * f - c * e;
+    const H = -(a * f - c * d);
+    const I = a * e - b * d;
+
+    const det = a * A + b * B + c * C;
+    if (Math.abs(det) < 1e-6) return identityMat3();
+
+    const invDet = 1.0 / det;
+    return [
+        A * invDet, D * invDet, G * invDet,
+        B * invDet, E * invDet, H * invDet,
+        C * invDet, F * invDet, I * invDet
+    ];
+}
+
+function transposeMat3(m) {
+    return [
+        m[0], m[3], m[6],
+        m[1], m[4], m[7],
+        m[2], m[5], m[8]
+    ];
+}
+
+function identityMat3() {
+    return [
+        1, 0, 0,
+        0, 1, 0,
+        0, 0, 1
+    ];
+}
+
+function identityMatrix() {
+    return [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    ];
+}
+
+function multiplyMat3ByVec3(m, v) {
+    return [
+        m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
+        m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
+        m[6] * v[0] + m[7] * v[1] + m[8] * v[2]
     ];
 }
 
 
-function unproject(screenPos, invViewProjMatrix) {
-    const [x, y, z] = screenPos;
-    const vec = [
-        x,
-        y,
-        z,
-        1.0
-    ];
 
+
+//                                   bevægelse (viewMatrix)
+function UpdateCamera(dt) {
+
+    const speed = 4.0;
+    const velocity = speed * dt;
+
+    const cosPitch = Math.cos(camera.pitch);
+    const sinPitch = Math.sin(camera.pitch);
+    const cosYaw = Math.cos(camera.yaw);
+    const sinYaw = Math.sin(camera.yaw);
+
+    const forward = normalize([
+        cosPitch * sinYaw,
+        sinPitch, 
+        -cosPitch * cosYaw
+    ]);
+
+    const right = normalize([
+        Math.cos(camera.yaw),
+        0,
+        Math.sin(camera.yaw)
+    ]);
+
+    if (keys[' ']) { 
+        camera.position[1] += velocity;
+    }
+    if (keys['shift']) {
+        camera.position[1] -= velocity;
+    }
+
+    if (keys['w']) camera.position = camera.position.map((v, i) => v + forward[i] * velocity);
+    if (keys['s']) camera.position = camera.position.map((v, i) => v - forward[i] * velocity);
+    if (keys['a']) camera.position = camera.position.map((v, i) => v - right[i] * velocity);
+    if (keys['d']) camera.position = camera.position.map((v, i) => v + right[i] * velocity);
+
+    if (joystickState.active) {
+        const forward = normalize([
+            Math.cos(camera.pitch) * Math.sin(camera.yaw),
+            Math.sin(camera.pitch),
+            -Math.cos(camera.pitch) * Math.cos(camera.yaw)
+        ]);
     
-    const out = [
-        vec[0] * invViewProjMatrix[0]  + vec[1] * invViewProjMatrix[4]  + vec[2] * invViewProjMatrix[8]  + vec[3] * invViewProjMatrix[12],
-        vec[0] * invViewProjMatrix[1]  + vec[1] * invViewProjMatrix[5]  + vec[2] * invViewProjMatrix[9]  + vec[3] * invViewProjMatrix[13],
-        vec[0] * invViewProjMatrix[2]  + vec[1] * invViewProjMatrix[6]  + vec[2] * invViewProjMatrix[10] + vec[3] * invViewProjMatrix[14],
-        vec[0] * invViewProjMatrix[3]  + vec[1] * invViewProjMatrix[7]  + vec[2] * invViewProjMatrix[11] + vec[3] * invViewProjMatrix[15]
-    ];
+        const right = normalize([
+            Math.cos(camera.yaw),
+            0,
+            Math.sin(camera.yaw)
+        ]);
 
-    return [out[0] / out[3], out[1] / out[3], out[2] / out[3]];
+        const dx = joystickState.direction[0];
+        const dy = joystickState.direction[1];
+    
+        for (let i = 0; i < 3; i++) {
+            camera.position[i] += right[i] * dx * velocity;
+            camera.position[i] += -forward[i] * dy * velocity;
+        }
+    }
 }
 
-                                    //raycast
+let lastTime = performance.now();
 
-function rayIntersectsTriangle(rayOrigin, rayDir, v0, v1, v2) {
-    const EPSILON = 1e-8;
-    const edge1 = [
-        v1[0] - v0[0],
-        v1[1] - v0[1],
-        v1[2] - v0[2]
-    ];
-    const edge2 = [
-        v2[0] - v0[0],
-        v2[1] - v0[1],
-        v2[2] - v0[2]
-    ];
+function loop(currentTime) {
+    const dt = (currentTime - lastTime) / 1000;
+    lastTime = currentTime;
 
-    const h = cross(rayDir, edge2);
-    const a = dot(edge1, h);
-    if (Math.abs(a) < EPSILON) return false;
+    UpdateCamera(dt);
+    Render();
 
-    const f = 1.0 / a;
-    const s = [
-        rayOrigin[0] - v0[0],
-        rayOrigin[1] - v0[1],
-        rayOrigin[2] - v0[2]
-    ];
-    const u = f * dot(s, h);
-    if (u < 0.0 || u > 1.0) return false;
-
-    const q = cross(s, edge1);
-    const v = f * dot(rayDir, q);
-    if (v < 0.0 || u + v > 1.0) return false;
-
-    const t = f * dot(edge2, q);
-    return t > EPSILON;
+    requestAnimationFrame(loop);
 }
 
-function rayIntersectsQuadDistance(rayOrigin, rayDir, quadVerts) {
-    const [a, b, c, d] = quadVerts;
+function UpdateUVMode() {
+    hasLogged = false;
 
-    const t1 = rayIntersectsTriangleDistance(rayOrigin, rayDir, a, b, c);
-    if (t1 !== null) return t1;
+    const shapeType = document.getElementById('shape').selectedIndex;
+    if (shapeType === 4) {  
 
-    const t2 = rayIntersectsTriangleDistance(rayOrigin, rayDir, a, c, d);
-    if (t2 !== null) return t2;
+        verticesModel.splice(0, verticesModel.length);
+        activeVertices = verticesModel;
 
-    return null;
+        //genskab modellen/figuren
+        const ew = document.getElementById('w');
+        const w = ew ? parseFloat(ew.value) : 1.0;
+
+        const eh = document.getElementById('h');
+        const h = eh ? parseFloat(eh.value) : 1.0;
+
+        const ed = document.getElementById('d');
+        const d = ed ? parseFloat(ed.value) : 1.0;
+
+        const dx = document.getElementById('dx');
+        const dy = document.getElementById('dy');
+        const divX = dx ? parseInt(dx.value) : 8;
+        const divY = dy ? parseInt(dy.value) : 8;
+
+        CreateSubdividedBox(w, h, d, divX, divY);
+
+        vertices = verticesGround.concat(verticesModel);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+        Render();
+    } else {
+        console.log("Local UVs virker kun på subdivided box.");
+    }
 }
-
-function rayIntersectsTriangleDistance(rayOrigin, rayDir, v0, v1, v2) {
-    const EPSILON = 1e-8;
-    const edge1 = [
-        v1[0] - v0[0],
-        v1[1] - v0[1],
-        v1[2] - v0[2]
-    ];
-    const edge2 = [
-        v2[0] - v0[0],
-        v2[1] - v0[1],
-        v2[2] - v0[2]
-    ];
-
-    const h = cross(rayDir, edge2);
-    const a = dot(edge1, h);
-
-    //undersøg om det er den rette
-    if (a > -EPSILON) return null;
-
-
-    const f = 1.0 / a;
-    const s = [
-        rayOrigin[0] - v0[0],
-        rayOrigin[1] - v0[1],
-        rayOrigin[2] - v0[2]
-    ];
-    const u = f * dot(s, h);
-    if (u < 0.0 || u > 1.0) return null;
-
-    const q = cross(s, edge1);
-    const v = f * dot(rayDir, q);
-    if (v < 0.0 || u + v > 1.0) return null;
-
-    const t = f * dot(edge2, q);
-
-
-    return t > EPSILON ? t : null;
-}
-
-
-
-
-
-
 
 
 //                                        hjælpefunktioner
@@ -1222,38 +1316,50 @@ function multiply4x4(a, b) {
     return out;
 }
 
-function identityMatrix() {
-    return [
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-    ];
+//tester ------------
+function normalMatrixFromModelMatrix(model) {
+    const m3 = extractMat3FromMat4(model);
+    const inv = inverseMat3(m3);
+    return inv ? transposeMat3(inv) : identityMat3();
 }
 
-function transformVec3(v, m) {
-    const x = v[0], y = v[1], z = v[2];
-    const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+function parseInputFloat(id, fallback = 0) {
+    const el = document.getElementById(id);
+    if (!el) return fallback;
+    const raw = el.value.replace(',', '.');
+    const val = parseFloat(raw);
+    return isNaN(val) ? fallback : val;
+}
+//tester ----------------------
 
-    return [
-        (m[0] * x + m[4] * y + m[8]  * z + m[12]) / w,
-        (m[1] * x + m[5] * y + m[9]  * z + m[13]) / w,
-        (m[2] * x + m[6] * y + m[10] * z + m[14]) / w
+
+function computeNormal(p1, p2, p3) {
+    const u = [
+        p2[0] - p1[0],
+        p2[1] - p1[1],
+        p2[2] - p1[2]
     ];
+    const v = [
+        p3[0] - p1[0],
+        p3[1] - p1[1],
+        p3[2] - p1[2]
+    ];
+    const normal = cross(u, v);
+    return normalize(normal);
 }
 
 
 
 
-
-
-
-                                            //grid
+//                                    grid
 
 //en enkelt linje (bræddet)
 function AddGridLine(x1, y1, z1, x2, y2, z2, r, g, b) {
-    AddVertex(x1, y1, z1, r, g, b);
-    AddVertex(x2, y2, z2, r, g, b);
+    const u = 0.0, v = 0.0;
+    const nx = 0.0, ny = 1.0, nz = 0.0;
+
+    AddVertex(x1, y1, z1, r, g, b, nx, ny, nz);
+    AddVertex(x2, y2, z2, r, g, b, nx, ny, nz);
 }
 
 //hele grid (hele gulvet af brædder) 
@@ -1280,9 +1386,15 @@ function CreateGroundGrid(width, depth, divX, divZ, yOffset = -0.5) {
 //bed GPU'en om at gøre grid statisk
 function drawGrid() {
 
-    //fjern teksturen 
-    gl.uniform4fv(displayGL, new Float32Array([0, 0, 0, 0]));
+    gl.uniform1i(useLightingGL, 0);
 
+    //fjern teksturen 
+    gl.uniform4fv(displayGL, new Float32Array([0, 1, 0, 0]));
+
+    //deaktiver bend
+    gl.uniform1f(twistGL, 0.0);
+
+    //for modellen 
     const identityMatrix = [
         1, 0, 0, 0,
         0, 1, 0, 0,
@@ -1290,153 +1402,55 @@ function drawGrid() {
         0, 0, 0, 1
     ];
     gl.uniformMatrix4fv(modelGL, false, new Float32Array(identityMatrix));
-    const groundVerticesCount = verticesGround.length / 8;
 
     gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
-    const stride = 8 * Float32Array.BYTES_PER_ELEMENT;
+    const stride = 11 * Float32Array.BYTES_PER_ELEMENT;
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
     gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
     gl.enableVertexAttribArray(0);
     gl.enableVertexAttribArray(1);
 
+    const groundVerticesCount = verticesGround.length / 11;
     gl.drawArrays(gl.LINES, 0, groundVerticesCount);
 
+    //genskab bend og display state bagefter
     const t = document.getElementById('t');
     const displayVal = t.checked ? 1.0 : 0.0;
     gl.uniform4fv(displayGL, new Float32Array([0, 0, 0, displayVal]));
-}
 
-
-
-
-function modelMatrix() {
-    //scale
-    const sx = parseFloat(document.getElementById('scaleX').value) || 1;
-    const sy = parseFloat(document.getElementById('scaleY').value) || 1;
-    const sz = parseFloat(document.getElementById('scaleZ').value) || 1;
-
-
-    //translation
-    const tx = parseFloat(document.getElementById('transX').value) || 0;
-    const ty = parseFloat(document.getElementById('transY').value) || 0;
-    const tz = parseFloat(document.getElementById('transZ').value) || 0;
-
-    //shear
-    const shXY = parseFloat(document.getElementById('shXY').value) || 0;
-    const shXZ = parseFloat(document.getElementById('shXZ').value) || 0;
-
-    //rotate
-    const rx = parseFloat(document.getElementById('rotX').value) * Math.PI / 180;
-    const ry = parseFloat(document.getElementById('rotY').value) * Math.PI / 180;
-    const rz = parseFloat(document.getElementById('rotZ').value) * Math.PI / 180;
-
-    const scaleMatrix = scalingMatrix(sx, sy, sz);
-    const shearMatrixLocal = shearMatrix(shXY, shXZ, 0, 0, 0, 0);
-    const rotX = rotationXMatrix(rx);
-    const rotY = rotationYMatrix(ry);
-    const rotZ = rotationZMatrix(rz);
-    const translateMatrix = translationMatrix(tx, ty, tz);
-
-                                      let modelMatrix = identityMatrix();
-                                      modelMatrix = multiply4x4(modelMatrix, scaleMatrix);
-                                      modelMatrix = multiply4x4(modelMatrix, shearMatrixLocal);
-                                      modelMatrix = multiply4x4(modelMatrix, rotX);
-                                      modelMatrix = multiply4x4(modelMatrix, rotY);
-                                      modelMatrix = multiply4x4(modelMatrix, rotZ);
-                                      modelMatrix = multiply4x4(modelMatrix, translateMatrix);
-
-    return modelMatrix;
-}
-
-
-function drawModel() {
-    const matrix = modelMatrix();
-    gl.uniformMatrix4fv(modelGL, false, new Float32Array(matrix));
-
-    const shapeType = document.getElementById('shape').selectedIndex;
-    if (shapeType === 0 || shapeType === 1) { 
-        gl.disable(gl.CULL_FACE);
-    } else {
-        gl.enable(gl.CULL_FACE);
-        gl.cullFace(gl.BACK); 
-    }
-
-
-    if (document.getElementById('showLocalAxes')?.checked) {
-        drawLocalAxes(matrix);
-    }
-    
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO);
-    const stride = 8 * Float32Array.BYTES_PER_ELEMENT;
-    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
-    gl.enableVertexAttribArray(1);
-    
-
-    const groundVerticesCount = verticesGround.length / 8;
-    gl.drawArrays(gl.TRIANGLES, groundVerticesCount, verticesModel.length / 8);
-
-
-    const highlightEnabled = document.getElementById('highlightSelected')?.checked;
-
-    for (let face of faceList) {
-        if (face.selected && highlightEnabled) {
-
-            //sluk tekstur
-            gl.uniform4fv(displayGL, new Float32Array([0, 0, 0, 0]));
-
-
-            const verts = face.vertices;
-    
-            const highlightVerts = new Float32Array([
-                ...verts[0], 0.0, 1.0, 0.5,
-                ...verts[1], 0.0, 1.0, 0.5,
-                ...verts[2], 0.0, 1.0, 0.5,
-                ...verts[3], 0.0, 1.0, 0.5,
-            ]);
-    
-            const highlightBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, highlightBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, highlightVerts, gl.STREAM_DRAW);
-    
-            const stride = 6 * Float32Array.BYTES_PER_ELEMENT;
-            const posLoc = gl.getAttribLocation(gl.getParameter(gl.CURRENT_PROGRAM), 'Pos');
-            const colLoc = gl.getAttribLocation(gl.getParameter(gl.CURRENT_PROGRAM), 'Color');
-    
-            gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, stride, 0);
-            gl.enableVertexAttribArray(posLoc);
-            gl.vertexAttribPointer(colLoc, 3, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
-            gl.enableVertexAttribArray(colLoc);
-    
-            gl.drawArrays(gl.LINE_LOOP, 0, 4);
-    
-            gl.deleteBuffer(highlightBuffer); 
-            gl.bindBuffer(gl.ARRAY_BUFFER, mainVBO); 
-    
-
-            const strideMain = 8 * Float32Array.BYTES_PER_ELEMENT;
-            gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, strideMain, 0);
-            gl.enableVertexAttribArray(posLoc);
-            gl.vertexAttribPointer(colLoc, 3, gl.FLOAT, false, strideMain, 3 * Float32Array.BYTES_PER_ELEMENT);
-            gl.enableVertexAttribArray(colLoc);
-
-
-            //tænd teksturen igen
-            const t = document.getElementById('t');
-            const displayVal = t.checked ? 1.0 : 0.0;
-            gl.uniform4fv(displayGL, new Float32Array([0, 0, 0, displayVal]));
-        }
-    }
+    //genaktiver bend efter grid (for modellen)
+    const twistSlider = document.getElementById('twistSlider');
+    const twistValue = twistSlider ? parseFloat(twistSlider.value) : 0.0;
+    gl.uniform1f(twistGL, twistValue);
 }
 
 
 
 
 
-                                                                  //mus
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//                         mouse
 
 let mouseX = 0;
 let mouseY = 0;
@@ -1461,13 +1475,7 @@ document.getElementById('gl').addEventListener('mousemove', function (e) {
     mouseY = e.y;
 });
 
-
-
-
-
-
-
-
+ //                      sørger for du kan scroll input med musseklik
 function makeInputDraggable(input, step = 0.1) {
     let dragging = false;
     let lastY = 0;
@@ -1512,30 +1520,14 @@ function makeInputDraggable(input, step = 0.1) {
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                  //mobil 
-
-
-                                                                  
+                                   //bevægelse på mobil (indsæt justering af transformationer)
+                                                                
 let joystickState = {
     active: false,
     angle: 0,
     distance: 0,
     direction: [0, 0]
 };
-
 
 function setupTouch() {
     let lastTouchX = null;
@@ -1569,7 +1561,6 @@ function setupTouch() {
         }
     });
     
-
     canvas.addEventListener('touchmove', (e) => {
         e.preventDefault();
     
@@ -1609,13 +1600,9 @@ function setupTouch() {
         }
     }, { passive: false });
 
-
-
     canvas.addEventListener('touchend', () => {
         lastDistance = null;
     });
-
-
 
     function updateRotation(rotX, rotY) {
         camera.yaw = rotX;
@@ -1638,9 +1625,7 @@ function setupTouch() {
             forward[2] * -zoomLevel
         ];
     }
-
 }
-
 
 function setupJoystickControl() {
     const container = document.getElementById("joystick-container");
@@ -1677,4 +1662,5 @@ function setupJoystickControl() {
         handle.style.left = "35px";
         handle.style.top = "35px";
     });
+
 }

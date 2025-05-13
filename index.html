@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -13,50 +15,78 @@
         </canvas>
 
         <textarea id="vs" spellcheck="false">
-            precision mediump float;
+precision mediump float;
 
-            attribute vec3 Pos;
-            attribute vec3 Color;
-            attribute vec2 UV;
+uniform float Twist;
 
-            uniform mat4 Model;
-            uniform mat4 View;
-            uniform mat4 Projection;
+attribute vec3 Pos;
+attribute vec3 Normal;
+attribute vec3 Color;
+attribute vec2 UV;
 
-            varying vec3 vertexColor;
-            varying vec2 uv;
+uniform mat4 Model;
+uniform mat4 View;
+uniform mat4 Projection;
+uniform mat3 NormalMatrix;
 
-            void main() {
-                gl_Position = Projection * View * Model * vec4(Pos, 1.0);
-                gl_PointSize = 10.0;
-                vertexColor = Color;
+varying vec3 vNormal;
+varying vec3 vColor;
+varying vec2 uv;
 
-                uv = UV;
-            }
+void main() {
+    vNormal = normalize(NormalMatrix * Normal);
+    vColor = Color;
+    uv = UV;
+    vec3 twistedPos = Pos;
 
-    
+    float angle = Twist * Pos.y; 
+    float s = sin(angle);
+    float c = cos(angle);
+
+
+    twistedPos.x = Pos.x * c - Pos.z * s;
+    twistedPos.z = Pos.x * s + Pos.z * c;
+
+
+    gl_Position = Projection * View * Model * vec4(twistedPos, 1.0);
+}
+
+
+
         </textarea>
         
         <textarea id="fs" spellcheck="false">
-            precision mediump float;
-            
-            varying vec3 vertexColor;
-            varying vec2 uv;
+precision mediump float;
 
-            uniform sampler2D Texture;
-            uniform vec4 Display;
+varying vec3 vNormal;
+varying vec3 vColor;
+varying vec2 uv;
 
-            
+uniform sampler2D Texture;
+uniform vec4 Display;
+uniform vec3 LightDir;
+uniform bool UseLighting;
 
-            void main() {
-                vec4 texColor = texture2D(Texture, uv);
-            
-                if (Display.w > 0.5) {
-                    gl_FragColor = texColor; // Vis tekstur
-                } else {
-                    gl_FragColor = vec4(vertexColor, 1.0); // Vis vertex farve
-                }
-            }
+//varying vec3 vertexColor;
+
+void main() {
+    float ambient = 0.3;
+    float lighting = 2.0;
+
+    if (UseLighting) {
+        vec3 lightDir = normalize(LightDir);
+        float diffuse = max(dot(normalize(vNormal), lightDir), 0.0);
+        lighting = ambient + (1.0 - ambient) * diffuse;
+    }
+
+    vec4 texColor = texture2D(Texture, uv);
+    vec4 baseColor = (Display.w > 0.5) 
+        ? texColor 
+        : vec4(vColor, 1.0);
+
+    gl_FragColor = vec4(baseColor.rgb * lighting, baseColor.a);
+}
+
         </textarea>
         
         <select id="shape" onchange="InitShaders();">
@@ -66,8 +96,6 @@
             <option>Box</option>
             <option selected>Subdivede Box</option>
         </select>
-
-
         
 
         <div id="joystick-container">
@@ -82,3 +110,4 @@
 
     </body>
     </html>
+
